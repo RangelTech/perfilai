@@ -99,5 +99,5 @@ def test_analise_diretor_e_redator(monkeypatch):
         return {"bios": ["a", "b", "c", "d"], "roteiros": [{}] * 5, "stories_venda": [{}] * 3, "carrosseis": [{}] * 3, "site": {"titulo": "t"}}
     monkeypatch.setattr(analise, "_chat", falso)
     r = analise.plano(Config(), {"arroba": "ana", "objetivo": "vender"}, [], lambda e, p: None)
-    assert [m for m, _ in chamadas] == ["rt-planejar", "rt-geral"] and "TOM-CARINHOSO" in chamadas[1][1]
+    assert [m for m, _ in chamadas] == ["rt-planejar", "rt-geral", "rt-geral", "rt-geral"] and all("TOM-CARINHOSO" in x for _, x in chamadas[1:])
     assert len(r["ideias"]) == 30 and len(r["bios"]) == 3 and len(r["referencias"]) == 3

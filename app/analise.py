@@ -40,33 +40,43 @@ Responda SÓ com JSON:
   "briefing_mao_de_obra": "instruções detalhadas para o redator que vai escrever bios, roteiros, stories, carrosséis e a página de vendas: tom de voz, palavras do nicho, promessa central, provas, objeções a quebrar"}}
 As ideias são exatamente 30, variadas entre os formatos. As referências são 3."""
 
-REDATOR = """Você é redator de Instagram. Siga o briefing do diretor à risca. Português do Brasil, sem emoji em excesso, sem promessa de resultado garantido.
+REDATOR_BASE = """Você é redator de Instagram. Siga o briefing do diretor à risca. Português do Brasil, sem emoji em excesso, sem promessa de resultado garantido.
 Perfil @{arroba}, nicho {nicho}, objetivo {objetivo}, produto {produto}.
 Briefing do diretor: {briefing}
 Posicionamento: {posicionamento}. Pilares: {pilares}.
+Responda SÓ com JSON válido (aspas duplas, sem comentários), exatamente neste formato:
+"""
 
-Responda SÓ com JSON:
-{{"bios": ["3 bios de até 150 caracteres, com chamada no fim"],
-  "roteiros": [{{"titulo": "", "gancho": "fala dos 3 primeiros segundos", "cenas": ["fala/ação cena a cena, 4 a 6 itens"], "texto_tela": "", "legenda": "", "hashtags": ["5"]}}],
-  "stories_venda": [{{"nome": "", "sequencia": ["story 1: ...", "story 2: ..."]}}],
-  "carrosseis": [{{"titulo": "título da capa (até 50 letras)", "laminas": ["texto de cada lâmina, até 140 letras, 5 a 7 lâminas"], "legenda": ""}}],
+PARTES = {
+    "bios_stories": """{{"bios": ["3 bios de até 150 caracteres, com chamada no fim"],
+  "stories_venda": [{{"nome": "", "sequencia": ["story 1: ...", "story 2: ...", "story 3: ..."]}}]}}
+Stories de venda: 3 sequências (uma "procuro N pessoas com <problema>, digita EU", uma "recebi uma mensagem" com enquete e depoimento, uma de bastidores com oferta).""",
+    "roteiros": """{{"roteiros": [{{"titulo": "", "gancho": "fala dos 3 primeiros segundos", "cenas": ["fala/ação cena a cena, 4 a 6 itens"], "texto_tela": "", "legenda": "", "hashtags": ["5"]}}]}}
+Exatamente 5 roteiros de Reels de 20 a 40 segundos.""",
+    "carrosseis_site": """{{"carrosseis": [{{"titulo": "título da capa (até 50 letras)", "laminas": ["texto de cada lâmina, até 140 letras, 5 a 7 lâminas"], "legenda": ""}}],
   "site": {{"titulo": "promessa principal", "subtitulo": "", "beneficios": ["4"], "prova": "frase de prova social genérica sem inventar números", "oferta": "", "chamada": "texto do botão",
            "faq": [{{"p": "", "r": ""}}]}}}}
-Roteiros: exatamente 5. Stories de venda: 3 sequências (uma "procuro N pessoas com <problema>, digita EU", uma "recebi uma mensagem" com enquete e depoimento, uma de bastidores com oferta).
-Carrosséis: exatamente 3. FAQ: 4 perguntas."""
+Exatamente 3 carrosséis. FAQ com 4 perguntas.""",
+}
 
 
 def _json(txt: str) -> dict:
     txt = re.sub(r"<think>.*?</think>", "", txt or "", flags=re.S)
+    txt = re.sub(r"^```(?:json)?|```$", "", txt.strip(), flags=re.M)
     m = re.search(r"\{.*\}", txt, re.S)
     if not m:
         raise ValueError("sem JSON")
-    return json.loads(m.group(0))
+    bruto = m.group(0)
+    try:
+        return json.loads(bruto)
+    except ValueError:
+        conserto = re.sub(r",\s*([}\]])", r"\1", bruto)  # vírgula sobrando antes de } ou ]
+        return json.loads(conserto, strict=False)        # strict=False aceita quebra de linha dentro de texto
 
 
 def _chat(cfg, cliente: httpx.Client, modelos: list[str], conteudo, max_tokens: int, temperatura: float = 0.6) -> dict:
     ultimo = None
-    for modelo in dict.fromkeys(m for m in modelos if m):
+    for modelo in [m for m in dict.fromkeys(m for m in modelos if m) for _ in (0, 1)]:
         try:
             r = cliente.post(cfg.llm_base + "/chat/completions", headers={"Authorization": f"Bearer {cfg.llm_key}"}, timeout=300,
                              json={"model": modelo, "temperature": temperatura, "max_tokens": max_tokens, "chat_template_kwargs": {"enable_thinking": False},
@@ -102,9 +112,17 @@ def plano(cfg, entrada: dict, prints: list[Path], avisar) -> dict:
                                                                                 ganchos="; ".join(GANCHOS)), 6000, 0.6)
         est = d.get("estrategia") or {}
         avisar("Escrevendo bios, roteiros, stories e carrosséis", 0.6)
-        w = _chat(cfg, c, [cfg.llm_modelo, cfg.llm_planejador], REDATOR.format(**a, briefing=str(d.get("briefing_mao_de_obra") or "")[:3000],
-                                                                                posicionamento=est.get("posicionamento", ""),
-                                                                                pilares=", ".join(est.get("pilares") or [])), 7000, 0.7)
+        base = REDATOR_BASE.format(**a, briefing=str(d.get("briefing_mao_de_obra") or "")[:3000], posicionamento=est.get("posicionamento", ""),
+                                   pilares=", ".join(est.get("pilares") or []))
+        w: dict = {}
+        for k, (nome, parte) in enumerate(PARTES.items()):
+            avisar(["Escrevendo bios e stories de venda", "Escrevendo os roteiros de Reels", "Escrevendo carrosséis e o site"][k], 0.55 + 0.1 * k)
+            try:
+                w.update(_chat(cfg, c, [cfg.llm_modelo, cfg.llm_planejador], base + parte.format(), 3500, 0.7))
+            except RuntimeError as e:  # uma parte que falhou não derruba o plano inteiro
+                log.warning("parte %s ficou de fora: %s", nome, e)
+        if not (w.get("bios") or w.get("roteiros")):
+            raise RuntimeError("redator não respondeu")
     ideias = [i for i in d.get("ideias") or [] if isinstance(i, dict) and i.get("gancho")][:30]
     return {"perfil": a, "leitura": leitura, "raio_x": d.get("raio_x") or {}, "estrategia": est, "ideias": ideias,
             "referencias": (d.get("referencias") or [])[:3], "bios": (w.get("bios") or [])[:3], "roteiros": (w.get("roteiros") or [])[:5],
