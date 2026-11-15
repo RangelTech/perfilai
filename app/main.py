@@ -59,6 +59,8 @@ class Config:
     admin_key: str = ""
     demo_email: str = ""
     demo_senha: str = ""
+    cortai_url: str = "https://cortai.rangeltech.net"
+    cortai_admin_key: str = ""            # ponte: Turbo inclui o Cortaí Pro com o mesmo e-mail
 
     def __post_init__(self):
         self.checkouts = self.checkouts or {}
@@ -75,7 +77,21 @@ def carregar() -> Config:
                   smtp_from=e("PERFILAI_SMTP_FROM", "Perfilaí <contato@rangeltech.net>"), cakto_segredo=e("PERFILAI_CAKTO_SEGREDO", ""),
                   dev=e("PERFILAI_DEV", "") == "1", checkouts=json.loads(e("PERFILAI_CHECKOUTS", "") or "{}"),
                   planos_por_produto=json.loads(e("PERFILAI_PLANOS_CAKTO", "") or "{}"), lancamento_ate=e("PERFILAI_LANCAMENTO_ATE", "2026-11-30"),
-                  admin_key=e("PERFILAI_ADMIN_KEY", ""), demo_email=e("PERFILAI_DEMO_EMAIL", ""), demo_senha=e("PERFILAI_DEMO_SENHA", ""))
+                  admin_key=e("PERFILAI_ADMIN_KEY", ""), demo_email=e("PERFILAI_DEMO_EMAIL", ""), demo_senha=e("PERFILAI_DEMO_SENHA", ""),
+                  cortai_admin_key=e("PERFILAI_CORTAI_ADMIN_KEY", ""))
+
+
+def ponte_cortai(cfg: Config, email: str, dias: int) -> bool:
+    """Turbo do Perfilaí libera o Cortaí Pro no mesmo e-mail (dias=0 revoga). Falha não quebra o webhook."""
+    if not cfg.cortai_admin_key:
+        return False
+    try:
+        import httpx
+        r = httpx.post(cfg.cortai_url + "/api/admin/cortesia", headers={"x-admin-key": cfg.cortai_admin_key}, json={"email": email, "plano": "pro", "dias": dias}, timeout=20)
+        return r.status_code == 200
+    except Exception:  # noqa: BLE001
+        log.warning("ponte Cortaí falhou para %s", email)
+        return False
 
 
 def pasta_plano(cfg: Config, pid: str) -> Path:
@@ -148,7 +164,8 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
         usados = db.um("SELECT COUNT(*) n FROM planos WHERE usuario=? AND criado>? AND estado!='erro'", (u["id"], ini))["n"]
         limite = pl["planos_mes"] if pl else 0
         return {"email": u["email"], "assinante": assin, "plano": u.get("plano") if assin else None, "usados": usados, "limite": limite,
-                "restam": max(0, limite - usados) if not eh_demo(u) else 99, "planos": planos_publicos()}
+                "restam": max(0, limite - usados) if not eh_demo(u) else 99, "planos": planos_publicos(),
+                "cortai": cfg.cortai_url + "/?entrar=1" if assin and u.get("plano") == "turbo" else None}
 
     def planos_publicos() -> list[dict]:
         return [{"codigo": k, **v, "checkout": cfg.checkouts.get(k) or "", "lancamento_ate": cfg.lancamento_ate} for k, v in PLANOS.items()]
@@ -319,9 +336,12 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
         if evento in ("purchase_approved", "subscription_renewed", "subscription_created"):
             plano = cfg.planos_por_produto.get(str((dados.get("product") or {}).get("id") or ""), "start")
             db.exec("UPDATE usuarios SET plano=?, ativo_ate=?, pedido=? WHERE id=?", (plano, max(agora(), u["ativo_ate"]) + 32 * 86400, str(dados.get("id") or ""), u["id"]))
-            return {"ok": True, "liberado": email}
+            cortai = ponte_cortai(cfg, email, 32) if plano == "turbo" else None
+            return {"ok": True, "liberado": email, **({"cortai": cortai} if cortai is not None else {})}
         if evento in ("refund", "chargeback", "subscription_canceled", "subscription_cancelled"):
             db.exec("UPDATE usuarios SET ativo_ate=? WHERE id=?", (agora(), u["id"]))
+            if u.get("plano") == "turbo":
+                ponte_cortai(cfg, email, 0)
             return {"ok": True, "revogado": email}
         return {"ok": True, "ignorado": evento}
 

@@ -26,7 +26,7 @@ FALSO = {"perfil": {"arroba": "doces.da.ana"}, "leitura": {}, "raio_x": {"nota":
 @pytest.fixture()
 def cli(tmp_path):
     cfg = Config(dados=str(tmp_path), dev=True, segredo_sessao="s", cakto_segredo="ck", admin_key="adm", demo_email="demo@rangeltech.net", demo_senha="Demo2026",
-                 planos_por_produto={"p-pro": "pro"}, checkouts={"start": "https://pay/x"})
+                 planos_por_produto={"p-pro": "pro", "p-turbo": "turbo"}, checkouts={"start": "https://pay/x"})
     app = criar_app(cfg, iniciar_fila=False)
     return TestClient(app), app
 
@@ -76,6 +76,16 @@ def test_demo_entra_com_senha_e_e_turbo(cli):
     assert c.post("/api/entrar/senha", json={"email": "demo@rangeltech.net", "senha": "Demo2026"}).status_code == 200
     j = c.get("/api/conta").json()
     assert j["assinante"] and j["plano"] == "turbo"
+
+
+def test_turbo_libera_cortai(cli, monkeypatch):
+    c, app = cli
+    chamadas = []
+    monkeypatch.setattr(main, "ponte_cortai", lambda cfg, email, dias: chamadas.append((email, dias)) or True)
+    r = c.post("/api/cakto", json={"secret": "ck", "event": "purchase_approved", "data": {"id": "t1", "customer": {"email": "t@x.com"}, "product": {"id": "p-turbo"}}})
+    assert r.json().get("cortai") is True and chamadas == [("t@x.com", 32)]
+    c.post("/api/cakto", json={"secret": "ck", "event": "refund", "data": {"id": "t1", "customer": {"email": "t@x.com"}, "product": {"id": "p-turbo"}}})
+    assert chamadas[-1] == ("t@x.com", 0)
 
 
 def test_admin_e_cakto(cli):

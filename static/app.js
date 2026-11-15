@@ -16,6 +16,7 @@
     conta = await api('/api/conta')
     $('#cota').innerHTML = conta.assinante ? `<b>${conta.restam > 90 ? '∞' : conta.restam}</b> plano${conta.restam === 1 ? '' : 's'} restante${conta.restam === 1 ? '' : 's'}` : 'Sem plano ativo'
     $('#sem-plano').hidden = conta.assinante
+    if (conta.cortai) { $('#b-cortai').href = conta.cortai; $('#b-cortai').hidden = false }
   }
   // prints: lê como data URL e reduz para no máximo 1600 px
   function reduzir(arq) {
