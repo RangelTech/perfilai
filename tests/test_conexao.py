@@ -5,6 +5,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+os.environ["PERFILAI_SEM_APP"] = "1"
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402
