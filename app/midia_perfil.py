@@ -174,7 +174,9 @@ def fatiar_icones(dados: bytes, colunas: int = 3, linhas: int = 2, cor: str = "#
             cel = im.crop((c * cw, r * ch, (c + 1) * cw, (r + 1) * ch))
             lado = min(cel.size)
             cel = cel.crop(((cel.width - lado) // 2, (cel.height - lado) // 2, (cel.width - lado) // 2 + lado, (cel.height - lado) // 2 + lado))
-            fundo = Image.new("RGB", (1080, 1080), _rgb(cor))
+            canto = [cel.getpixel((x, y)) for x, y in ((2, 2), (lado - 3, 2), (2, lado - 3), (lado - 3, lado - 3))]
+            bg = tuple(sorted(c[i] for c in canto)[1] for i in range(3))  # cor de fundo real da célula (sem o quadrado mais claro)
+            fundo = Image.new("RGB", (1080, 1080), bg)
             cel = cel.resize((760, 760), Image.LANCZOS)
             fundo.paste(cel, (160, 160))
             px = list(cel.convert("L").resize((32, 32)).getdata())

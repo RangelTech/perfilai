@@ -59,11 +59,10 @@ def classificar(prompt: str, base: str, key: str, modelo: str = "rt-geral") -> s
 
 
 def _gpt(prompt: str, tamanho: str, base: str, key: str, referencia: bytes | None) -> bytes:
-    if referencia:
-        r = httpx.post(base + "/images/edits", headers=_h(key), timeout=300,
-                       files={"image": ("ref.png", referencia, "image/png")}, data={"prompt": prompt, "size": tamanho})
-    else:
-        r = httpx.post(base + "/images/generations", headers=_h(key), timeout=300, json={"prompt": prompt, "size": tamanho})
+    corpo = {"prompt": prompt, "size": tamanho}
+    if referencia:  # o llm-access passa a foto ao GPT como referência (editar mantendo a pessoa)
+        corpo["images"] = ["data:image/png;base64," + base64.b64encode(referencia).decode()]
+    r = httpx.post(base + "/images/generations", headers=_h(key), timeout=300, json=corpo)
     if r.status_code >= 400:
         raise RuntimeError(f"gpt {r.status_code}: {r.text[:300]}")
     d = r.json()["data"][0]
