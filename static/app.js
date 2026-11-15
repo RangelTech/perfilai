@@ -14,7 +14,7 @@
   let conta = null, prints = [], aberto = null
   async function carregarConta() {
     conta = await api('/api/conta')
-    $('#cota').innerHTML = conta.assinante ? `<b>${conta.restam > 90 ? '∞' : conta.restam}</b> plano${conta.restam === 1 ? '' : 's'} restante${conta.restam === 1 ? '' : 's'}` : 'Sem plano ativo'
+    $('#cota').innerHTML = conta.assinante ? (conta.limite_contas > 90 ? 'Demonstração' : `<b>${conta.contas_semana}/${conta.limite_contas}</b> contas · <b>${conta.posts_semana}/${conta.limite_posts}</b> posts na semana`) : 'Sem plano ativo'
     $('#sem-plano').hidden = conta.assinante
     if (conta.cortai) { $('#b-cortai').href = conta.cortai; $('#b-cortai').hidden = false }
   }
@@ -58,7 +58,7 @@
     if (planos.some((p) => p.estado === 'fila' || p.estado === 'rodando')) tm = setTimeout(listar, 4000)
   }
   const bloco = (titulo, texto) => `<div class="bl"><div class="bl-t"><strong>${esc(titulo)}</strong><button class="copiar" data-copiar="${esc(texto)}">Copiar</button></div><p>${esc(texto).replace(/\n/g, '<br>')}</p></div>`
-  const ABAS = [['raio', 'Raio-x'], ['bios', 'Bios'], ['ideias', '30 ideias'], ['roteiros', 'Roteiros'], ['stories', 'Stories'], ['carrosseis', 'Carrosséis'], ['site', 'Site'], ['nicho', 'Nicho']]
+  const ABAS = [['raio', 'Raio-x'], ['bios', 'Bios'], ['ideias', '30 ideias'], ['posts', 'Posts da semana'], ['roteiros', 'Roteiros'], ['stories', 'Stories'], ['carrosseis', 'Carrosséis'], ['site', 'Site'], ['nicho', 'Nicho'], ['renda', 'Renda extra']]
   function render(p, aba) {
     const r = p.resultado, rx = r.raio_x || {}, est = r.estrategia || {}
     const corpo = {
@@ -78,14 +78,38 @@
         <div class="bl dest"><strong>Baixar o site de vendas</strong><p>Cole o link do checkout da Cakto (se já tiver) e baixe o .zip com a página e o passo a passo para publicar grátis no GitHub.</p>
         <div class="linha"><input id="ck" type="url" placeholder="https://pay.cakto.com.br/…"><a class="btn btn-pri" id="b-zip" href="/api/planos/${p.id}/site.zip">Baixar site</a></div>
         <ol class="passo-a-passo"><li>Crie sua conta na <b>Cakto</b> e cadastre o produto; copie o link do checkout.</li><li>Crie uma conta grátis no <b>GitHub</b> e um repositório chamado <code>seu-usuario.github.io</code>.</li><li>Envie o <code>index.html</code> do .zip (Add file → Upload files) e confirme.</li><li>Em Settings → Pages, deixe a branch main. Em 2 minutos o site abre; coloque o endereço na bio.</li></ol></div>`,
+      posts: () => `<div class="bl dest"><strong>Post do dia</strong><p>Um post pronto por dia (7 por semana), com imagem, gancho e o seu @, a partir das ideias deste plano. Baixe e poste, ou leve para o agendador.</p>
+        <button class="btn btn-pri" id="b-post" data-plano="${p.id}">Gerar o post de hoje</button><div class="msg" id="post-msg"></div></div><div class="posts-g" id="posts-g"><div class="vazio">Carregando…</div></div>`,
+      renda: () => { const x = r.renda_extra || {}; return x.servico ? `<div class="bl dest"><strong>${esc(x.servico)}</strong><p><b>Para quem:</b> ${esc(x.para_quem)}</p><p><b>Preço sugerido:</b> ${esc(x.preco_sugerido)}</p></div>
+        <div class="bl"><strong>O que entregar</strong><ul>${(x.entregaveis || []).map((y) => `<li>${esc(y)}</li>`).join('')}</ul></div>
+        ${(x.abordagem || []).map((y, i) => bloco('Mensagem de abordagem ' + (i + 1), y)).join('')}
+        ${x.proposta ? bloco('Proposta comercial', x.proposta) : ''}
+        <div class="bl"><strong>Cuidados</strong><ul>${(x.cuidados || []).map((y) => `<li>${esc(y)}</li>`).join('')}</ul></div><small>Faça para outras pessoas o que este plano fez por você. Sem promessa de seguidores ou vendas.</small>` : '<div class="vazio">Este plano foi feito antes do plano de renda extra existir. Gere um plano novo para ver.</div>' },
       nicho: () => (r.referencias || []).map((x) => `<div class="bl"><strong>${esc(x.perfil)}</strong><p>${esc(x.o_que_fazem)}</p><p><b>Copiar:</b> ${esc(x.copiar)}</p><p><b>Evitar:</b> ${esc(x.evitar)}</p></div>`).join('') + '<small>Referências sugeridas pela IA a partir do nicho: confira os perfis antes de se basear neles.</small>',
     }[aba]()
     $('#folha-corpo').innerHTML = `<div class="pl-cab"><b>@${esc(p.entrada.arroba)}</b><span>${esc(p.entrada.objetivo)}</span></div>
       <div class="abas-p" role="tablist">${ABAS.map(([k, n]) => `<button class="${k === aba ? 'on' : ''}" data-aba="${k}" role="tab">${n}</button>`).join('')}</div><div class="conteudo">${corpo}</div>`
+    if (aba === 'posts') carregarPosts()
     const ck = $('#ck')
     if (ck) ck.oninput = () => { $('#b-zip').href = `/api/planos/${p.id}/site.zip` + (ck.value ? '?checkout=' + encodeURIComponent(ck.value.trim()) : '') }
   }
+  async function carregarPosts() {
+    try {
+      const j = await api('/api/posts')
+      const g = $('#posts-g'); if (!g) return
+      g.innerHTML = j.posts.length ? j.posts.map((x) => `<div class="post-i"><a href="${x.url}" download="post-${esc(x.dia)}.png"><img src="${x.url}" alt="Post de ${esc(x.dia)}" loading="lazy"></a>
+        <div><small>${esc(x.dia.split('-').reverse().join('/'))} · @${esc(x.arroba)}</small><p>${esc(x.legenda)}</p><button class="copiar" data-copiar="${esc(x.legenda)}">Copiar legenda</button></div></div>`).join('') : '<div class="vazio">Nenhum post ainda. Gere o de hoje.</div>'
+    } catch {}
+  }
   document.addEventListener('click', async (e) => {
+    const bp = e.target.closest('#b-post')
+    if (bp) {
+      bp.disabled = true; bp.textContent = 'Criando a imagem… (até 1 minuto)'
+      const m = $('#post-msg')
+      try { await api('/api/planos/' + bp.dataset.plano + '/post', { method: 'POST' }); m.textContent = 'Post de hoje pronto.'; m.className = 'msg ok'; carregarPosts(); carregarConta() }
+      catch (err) { m.textContent = err.message; m.className = 'msg erro' } finally { bp.disabled = false; bp.textContent = 'Gerar o post de hoje' }
+      return
+    }
     const cp = e.target.closest('[data-copiar]')
     if (cp) { try { await navigator.clipboard.writeText(cp.dataset.copiar); toast('Copiado!') } catch {} return }
     const ab = e.target.closest('[data-abrir]')
@@ -99,4 +123,31 @@
   addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#folha').hidden = true })
   $('#sair').onclick = async () => { await fetch('/api/sair', { method: 'POST' }); location.href = '/' }
   carregarConta().then(listar).catch(() => {})
+})()
+
+// Kit de marca nas fotos e vídeos do cliente (spec 44 5.2)
+;(() => {
+  const $ = (q) => document.querySelector(q)
+  const inp = $('#kit-arq'); if (!inp) return
+  const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+  async function listar() {
+    try {
+      const j = await (await fetch('/api/kit')).json()
+      $('#kit-lista').innerHTML = (j.itens || []).map((x) => x.tipo === 'video' ? `<video src="${x.url}" controls playsinline preload="none"></video>` : `<a href="${x.url}" download><img src="${x.url}" alt="Foto com a marca" loading="lazy"></a>`).join('')
+    } catch {}
+  }
+  inp.onchange = () => {
+    const f = inp.files[0]; if (!f) return
+    const ar = ($('#kit-arroba').value || $('#arroba').value || '').trim()
+    const m = $('#kit-msg')
+    if (!ar) { m.textContent = 'Digite o @ que vai aparecer.'; m.className = 'msg erro'; return }
+    const x = new XMLHttpRequest(); x.open('POST', '/api/kit')
+    x.setRequestHeader('x-arquivo', f.name); x.setRequestHeader('x-arroba', ar); x.setRequestHeader('x-cor', $('#kit-cor').value)
+    m.textContent = 'Aplicando a sua marca…'; m.className = 'msg'
+    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText) } catch {}
+      if (x.status >= 400) { m.textContent = typeof j.detail === 'string' ? j.detail : 'Não deu certo.'; m.className = 'msg erro' } else { m.textContent = 'Pronto! Toque para baixar.'; m.className = 'msg ok'; listar() }
+      inp.value = '' }
+    x.send(f)
+  }
+  listar()
 })()

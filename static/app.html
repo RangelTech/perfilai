@@ -32,6 +32,17 @@
     </form>
   </section>
 
+  <section class="painel-novo kit" id="kit">
+    <h2>Kit de marca nas suas fotos e vídeos</h2>
+    <p class="sub-p">Suba uma foto ou um vídeo seu (até 2 minutos) e receba de volta com a faixa da sua marca e o seu @, com animação de entrada. Sem cortar nada.</p>
+    <div class="dois"><div><label for="kit-arroba">@ que aparece</label><input id="kit-arroba" placeholder="@seuperfil" autocomplete="off"></div>
+      <div><label for="kit-cor">Cor da faixa</label><input id="kit-cor" type="color" value="#b46bff" class="cor"></div></div>
+    <label class="soltar" for="kit-arq"><input id="kit-arq" type="file" accept="image/jpeg,image/png,video/mp4,video/quicktime,.jpg,.jpeg,.png,.mp4,.mov" hidden>
+      <strong>Escolher foto ou vídeo</strong><span>JPG, PNG, MP4 ou MOV.</span></label>
+    <div class="msg" id="kit-msg" role="alert"></div>
+    <div class="kit-lista" id="kit-lista"></div>
+  </section>
+
   <section class="lista-planos">
     <h2>Meus planos</h2>
     <div id="planos"></div>

@@ -57,6 +57,11 @@ Exatamente 5 roteiros de Reels de 20 a 40 segundos.""",
   "site": {{"titulo": "promessa principal", "subtitulo": "", "beneficios": ["4"], "prova": "frase de prova social genérica sem inventar números", "oferta": "", "chamada": "texto do botão",
            "faq": [{{"p": "", "r": ""}}]}}}}
 Exatamente 3 carrosséis. FAQ com 4 perguntas.""",
+    "renda_extra": """{{"renda_extra": {{"servico": "nome do serviço que a pessoa pode vender fazendo para outros o que este plano fez por ela",
+  "para_quem": "tipo de cliente (ex.: pequenos negócios do mesmo nicho da cidade)", "preco_sugerido": "faixa em reais por mês ou por pacote",
+  "entregaveis": ["4 a 6 itens do pacote"], "abordagem": ["3 mensagens curtas de abordagem por direct/WhatsApp"], "proposta": "texto curto de proposta comercial",
+  "cuidados": ["2 a 3 cuidados: sem prometer seguidores ou vendas, contrato simples, aprovar antes de publicar"]}}}}
+Seja realista: sem promessa de ganho garantido.""",
 }
 
 
@@ -116,7 +121,7 @@ def plano(cfg, entrada: dict, prints: list[Path], avisar) -> dict:
                                    pilares=", ".join(est.get("pilares") or []))
         w: dict = {}
         for k, (nome, parte) in enumerate(PARTES.items()):
-            avisar(["Escrevendo bios e stories de venda", "Escrevendo os roteiros de Reels", "Escrevendo carrosséis e o site"][k], 0.55 + 0.1 * k)
+            avisar(["Escrevendo bios e stories de venda", "Escrevendo os roteiros de Reels", "Escrevendo carrosséis e o site", "Montando o plano de renda extra"][k], 0.55 + 0.08 * k)
             try:
                 w.update(_chat(cfg, c, [cfg.llm_modelo, cfg.llm_planejador], base + parte.format(), 3500, 0.7))
             except RuntimeError as e:  # uma parte que falhou não derruba o plano inteiro
@@ -126,4 +131,5 @@ def plano(cfg, entrada: dict, prints: list[Path], avisar) -> dict:
     ideias = [i for i in d.get("ideias") or [] if isinstance(i, dict) and i.get("gancho")][:30]
     return {"perfil": a, "leitura": leitura, "raio_x": d.get("raio_x") or {}, "estrategia": est, "ideias": ideias,
             "referencias": (d.get("referencias") or [])[:3], "bios": (w.get("bios") or [])[:3], "roteiros": (w.get("roteiros") or [])[:5],
-            "stories_venda": (w.get("stories_venda") or [])[:3], "carrosseis": (w.get("carrosseis") or [])[:3], "site": w.get("site") or {}}
+            "stories_venda": (w.get("stories_venda") or [])[:3], "carrosseis": (w.get("carrosseis") or [])[:3], "site": w.get("site") or {},
+            "renda_extra": w.get("renda_extra") or {}}

@@ -20,21 +20,23 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from app import senha_rotas
-from app import analise, auth, mailer, pecas
+from app import analise, auth, mailer, midia_perfil, pecas, rt_midia
 from app.db import Banco, agora
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("perfilai")
 ESTATICO = Path(__file__).resolve().parent.parent / "static"
 COOKIE = "perfilai_s"
-PLANOS = {
-    "start": {"nome": "Start", "preco": 19.90, "depois": 29.90, "planos_mes": 2,
-              "itens": ["2 planos completos por mês", "Raio-x do perfil e 3 bios", "30 ideias com gancho e 5 roteiros", "Site de vendas pronto"]},
-    "pro": {"nome": "Pro", "preco": 29.90, "depois": 39.90, "planos_mes": 6,
-            "itens": ["6 planos por mês", "Tudo do Start", "3 carrosséis prontos para postar", "Stories de venda e análise do nicho"]},
-    "turbo": {"nome": "Turbo", "preco": 59.90, "depois": 79.90, "planos_mes": 20,
-              "itens": ["20 planos por mês (até 3 perfis)", "Tudo do Pro", "Fila prioritária", "Reels editados no Cortaí com a sua marca"]},
+PLANOS = {  # spec 44 5.2: limite por CONTAS por semana; cada conta até 3 rodadas na semana; 7 posts por semana (1 por dia)
+    "start": {"nome": "Start", "preco": 19.90, "depois": 29.90, "contas_semana": 1,
+              "itens": ["1 conta por semana (até 3 rodadas)", "Raio-x, bios, 30 ideias e roteiros", "7 posts prontos por semana (1 por dia)", "Kit de marca nas suas fotos e vídeos", "Como vender esse serviço como renda extra"]},
+    "pro": {"nome": "Pro", "preco": 49.90, "depois": 59.90, "contas_semana": 3,
+            "itens": ["3 contas por semana (até 3 rodadas cada)", "Tudo do Start", "Carrosséis, stories de venda e análise do nicho", "Site de vendas pronto"]},
+    "turbo": {"nome": "Top", "preco": 97.00, "depois": 127.00, "contas_semana": 5,
+              "itens": ["5 contas por semana (até 3 rodadas cada)", "Tudo do Pro", "Cortaí incluso (cortes e tela dividida)", "Fila prioritária"]},
 }
+RODADAS_POR_CONTA = 3
+POSTS_SEMANA = 7
 
 
 @dataclass
@@ -158,14 +160,26 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
     def eh_demo(u: dict) -> bool:
         return bool(cfg.demo_email) and u["email"] == cfg.demo_email.lower()
 
+    def uso_semana(u: dict) -> dict:
+        ini = midia_perfil.inicio_semana(agora())
+        linhas = db.todos("SELECT entrada FROM planos WHERE usuario=? AND criado>=? AND estado!='erro'", (u["id"], ini))
+        por_conta: dict[str, int] = {}
+        for l in linhas:
+            a = (json.loads(l["entrada"]).get("arroba") or "").lower()
+            por_conta[a] = por_conta.get(a, 0) + 1
+        posts = db.um("SELECT COUNT(*) n FROM posts WHERE usuario=? AND criado>=?", (u["id"], ini))["n"]
+        return {"por_conta": por_conta, "posts": posts}
+
     def conta(u: dict) -> dict:
         assin = auth.assinante(u)
         pl = PLANOS.get(u.get("plano") or "start") if assin else None
-        ini = agora() - 30 * 86400
-        usados = db.um("SELECT COUNT(*) n FROM planos WHERE usuario=? AND criado>? AND estado!='erro'", (u["id"], ini))["n"]
-        limite = pl["planos_mes"] if pl else 0
-        return {"email": u["email"], "assinante": assin, "plano": u.get("plano") if assin else None, "usados": usados, "limite": limite,
-                "restam": max(0, limite - usados) if not eh_demo(u) else 99, "planos": planos_publicos(),
+        us = uso_semana(u)
+        limite = pl["contas_semana"] if pl else 0
+        demo = eh_demo(u)
+        return {"email": u["email"], "assinante": assin, "plano": u.get("plano") if assin else None,
+                "contas_semana": len(us["por_conta"]), "limite_contas": 99 if demo else limite, "rodadas": us["por_conta"], "rodadas_por_conta": RODADAS_POR_CONTA,
+                "posts_semana": us["posts"], "limite_posts": 99 if demo else POSTS_SEMANA,
+                "restam": 99 if demo else (max(0, limite - len(us["por_conta"])) if assin else 0), "planos": planos_publicos(),
                 "cortai": cfg.cortai_url + "/?entrar=1" if assin and u.get("plano") == "turbo" else None}
 
     def planos_publicos() -> list[dict]:
@@ -236,14 +250,20 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
     async def novo_plano(request: Request):
         u = usuario(request)
         c = conta(u)
-        if c["restam"] <= 0:
-            raise HTTPException(402, "escolha um plano para começar" if not c["assinante"] else "você usou os planos do mês; suba de plano para continuar")
+        if not c["assinante"] and not eh_demo(u):
+            raise HTTPException(402, "escolha um plano para começar")
         if db.um("SELECT COUNT(*) n FROM planos WHERE usuario=? AND estado IN ('fila','rodando')", (u["id"],))["n"] >= 1:
             raise HTTPException(429, "espere o plano atual ficar pronto")
         b = await request.json()
         arroba = re.sub(r"[^A-Za-z0-9_.]", "", str(b.get("arroba") or "").strip().lstrip("@"))[:30]
         if not arroba:
             raise HTTPException(422, "informe o @ do perfil")
+        if not eh_demo(u):
+            ja = c["rodadas"].get(arroba.lower(), 0)
+            if ja == 0 and c["contas_semana"] >= c["limite_contas"]:
+                raise HTTPException(402, f"você já analisou {c['contas_semana']} conta(s) esta semana, o limite do seu plano; na segunda-feira libera de novo, ou suba de plano")
+            if ja >= RODADAS_POR_CONTA:
+                raise HTTPException(429, f"essa conta já teve {RODADAS_POR_CONTA} rodadas esta semana; na segunda-feira libera de novo")
         objetivo = str(b.get("objetivo") or "").strip()[:300]
         if len(objetivo) < 5:
             raise HTTPException(422, "conte em uma frase o que você quer com o Instagram (vender o quê, para quem)")
@@ -306,6 +326,129 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
         return Response(z, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="site-{r["perfil"].get("arroba", "perfil")}.zip"'})
 
     # ------------------------------------------------ Cakto
+    # ------------------------------------------------------------ posts da semana (spec 44 5.2)
+    def post_publico(x: dict) -> dict:
+        return {"id": x["id"], "dia": x["dia"], "arroba": x["arroba"], "gancho": x["gancho"], "legenda": x["legenda"], "url": f"/api/posts/{x['id']}.png"}
+
+    @app.get("/api/posts")
+    def meus_posts(request: Request):
+        u = usuario(request)
+        return {"posts": [post_publico(x) for x in db.todos("SELECT * FROM posts WHERE usuario=? ORDER BY criado DESC LIMIT 60", (u["id"],))]}
+
+    @app.get("/api/posts/{nome}")
+    def post_arquivo(nome: str, request: Request):
+        u = usuario(request)
+        pid = nome.removesuffix(".png")
+        x = db.um("SELECT * FROM posts WHERE id=? AND usuario=?", (pid, u["id"]))
+        if not x or not re.fullmatch(r"[0-9a-f]{16}", pid):
+            raise HTTPException(404, "post não encontrado")
+        return FileResponse(Path(cfg.dados) / "posts" / x["arquivo"], media_type="image/png", filename=f"post-{x['dia']}.png")
+
+    @app.post("/api/planos/{pid}/post")
+    def gerar_post(pid: str, request: Request):
+        """Post do dia: 1 por dia e 7 por semana. Imagem pelo GPT (regra 5.0), gancho e @ por cima."""
+        u = usuario(request)
+        p = db.um("SELECT * FROM planos WHERE id=? AND usuario=?", (pid, u["id"]))
+        if not p or p["estado"] != "pronto":
+            raise HTTPException(404, "plano não encontrado ou ainda não ficou pronto")
+        c = conta(u)
+        if not c["assinante"] and not eh_demo(u):
+            raise HTTPException(402, "escolha um plano para gerar posts")
+        dia = midia_perfil.hoje(agora())
+        if not eh_demo(u):
+            if db.um("SELECT COUNT(*) n FROM posts WHERE usuario=? AND dia=?", (u["id"], dia))["n"] >= 1:
+                raise HTTPException(429, "o post de hoje já saiu; amanhã tem outro")
+            if c["posts_semana"] >= POSTS_SEMANA:
+                raise HTTPException(429, f"você já gerou os {POSTS_SEMANA} posts desta semana; na segunda-feira libera de novo")
+        r = json.loads(p["resultado"])
+        ent = json.loads(p["entrada"])
+        usados = {x["gancho"] for x in db.todos("SELECT gancho FROM posts WHERE plano=?", (pid,))}
+        ideias = [i for i in r.get("ideias") or [] if i.get("gancho") and i["gancho"] not in usados]
+        ideias.sort(key=lambda i: 0 if str(i.get("formato", "")).lower() in ("post", "carrossel") else 1)
+        if not ideias:
+            raise HTTPException(409, "as ideias deste plano acabaram; gere um plano novo para mais posts")
+        idei = ideias[0]
+        prompt = (f"Instagram feed post image for a {ent.get('nicho') or 'small business'} profile. Scene that illustrates: {idei.get('ideia') or idei['gancho']}. "
+                  f"Professional photography or clean illustration, brand color {ent.get('cor') or '#b46bff'} as accent, empty space at the bottom for text, no text, no watermark.")
+        try:
+            res = rt_midia.imagem(prompt, cfg.llm_base, cfg.llm_key, "1024x1536")
+        except rt_midia.ImagemIndisponivel as e:
+            raise HTTPException(503, str(e))
+        png = midia_perfil.montar_post(res.dados, idei["gancho"], ent.get("arroba") or "", ent.get("cor") or "#b46bff")
+        novo = uuid.uuid4().hex[:16]
+        pasta = Path(cfg.dados) / "posts"
+        pasta.mkdir(parents=True, exist_ok=True)
+        (pasta / f"{novo}.png").write_bytes(png)
+        tags = " ".join("#" + re.sub(r"\W", "", w_) for w_ in (ent.get("nicho") or "").split()[:3] if re.sub(r"\W", "", w_))
+        legenda = (str(idei.get("ideia") or "") + ("\n\n" + tags if tags else "")).strip()
+        db.exec("INSERT INTO posts(id,usuario,plano,arroba,dia,gancho,legenda,arquivo,rota,criado) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (novo, u["id"], pid, ent.get("arroba"), dia, idei["gancho"], legenda, f"{novo}.png", res.rota, agora()))
+        log.info("post %s rota=%s", novo, res.rota)
+        return post_publico(db.um("SELECT * FROM posts WHERE id=?", (novo,)))
+
+    # ------------------------------------------------------------ kit de marca em foto/vídeo do cliente (sem edição)
+    @app.get("/api/kit")
+    def meus_kits(request: Request):
+        u = usuario(request)
+        return {"itens": [{"id": x["id"], "tipo": x["tipo"], "url": f"/api/kit/{x['arquivo']}"} for x in db.todos("SELECT * FROM kits WHERE usuario=? ORDER BY criado DESC LIMIT 30", (u["id"],))]}
+
+    @app.get("/api/kit/{nome}")
+    def kit_arquivo(nome: str, request: Request):
+        u = usuario(request)
+        x = db.um("SELECT * FROM kits WHERE arquivo=? AND usuario=?", (nome, u["id"]))
+        if not x:
+            raise HTTPException(404, "arquivo não encontrado")
+        return FileResponse(Path(cfg.dados) / "kit" / nome, filename=f"com-marca-{nome}")
+
+    @app.post("/api/kit")
+    async def novo_kit(request: Request):
+        """Corpo cru (foto ou vídeo até 2 min / 200 MB), nome no cabeçalho x-arquivo, @ e cor em x-arroba / x-cor."""
+        u = usuario(request)
+        c = conta(u)
+        if not c["assinante"] and not eh_demo(u):
+            raise HTTPException(402, "escolha um plano para usar o kit de marca")
+        nome = request.headers.get("x-arquivo") or "foto.jpg"
+        ext = ("." + nome.rsplit(".", 1)[-1].lower()) if "." in nome else ".jpg"
+        foto = ext in (".jpg", ".jpeg", ".png", ".webp")
+        if not foto and ext not in (".mp4", ".mov", ".webm", ".m4v"):
+            raise HTTPException(422, "mande uma foto (JPG, PNG) ou um vídeo (MP4, MOV)")
+        arroba = re.sub(r"[^A-Za-z0-9_.]", "", (request.headers.get("x-arroba") or "").lstrip("@"))[:30]
+        if not arroba:
+            raise HTTPException(422, "informe o @ que vai aparecer")
+        cor = request.headers.get("x-cor") or "#b46bff"
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", cor):
+            cor = "#b46bff"
+        pasta = Path(cfg.dados) / "kit"
+        pasta.mkdir(parents=True, exist_ok=True)
+        novo = uuid.uuid4().hex[:16]
+        tmp = pasta / f"{novo}_in{ext}"
+        total = 0
+        with open(tmp, "wb") as f:
+            async for parte in request.stream():
+                total += len(parte)
+                if total > 200 * 1024 * 1024:
+                    f.close()
+                    tmp.unlink(missing_ok=True)
+                    raise HTTPException(413, "o arquivo passa de 200 MB")
+                f.write(parte)
+        if total < 500:
+            tmp.unlink(missing_ok=True)
+            raise HTTPException(422, "o arquivo chegou vazio")
+        try:
+            if foto:
+                saida = f"{novo}.jpg"
+                midia_perfil.kit_foto(tmp, pasta / saida, arroba, cor)
+            else:
+                dur = midia_perfil.duracao(tmp)
+                if dur <= 0 or dur > midia_perfil.MAX_VIDEO_S:
+                    raise HTTPException(422, "o vídeo pode ter até 2 minutos")
+                saida = f"{novo}.mp4"
+                midia_perfil.kit_video(tmp, pasta / saida, arroba, cor)
+        finally:
+            tmp.unlink(missing_ok=True)
+        db.exec("INSERT INTO kits(id,usuario,arquivo,tipo,criado) VALUES(?,?,?,?,?)", (novo, u["id"], saida, "foto" if foto else "video", agora()))
+        return {"id": novo, "tipo": "foto" if foto else "video", "url": f"/api/kit/{saida}"}
+
     @app.post("/api/cakto")
     async def cakto(request: Request):
         cru = await request.body()

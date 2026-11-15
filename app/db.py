@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS planos (
 );
 CREATE INDEX IF NOT EXISTS planos_usuario ON planos(usuario, criado);
 CREATE TABLE IF NOT EXISTS eventos_cakto (id TEXT PRIMARY KEY, recebido REAL NOT NULL, corpo TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, usuario INTEGER NOT NULL, plano TEXT NOT NULL, arroba TEXT, dia TEXT NOT NULL, gancho TEXT, legenda TEXT,
+  arquivo TEXT NOT NULL, rota TEXT, criado REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS kits (id TEXT PRIMARY KEY, usuario INTEGER NOT NULL, arquivo TEXT NOT NULL, tipo TEXT NOT NULL, criado REAL NOT NULL);
 """
 
 

@@ -79,3 +79,12 @@ code{background:var(--bg2);border:1px solid var(--bd);border-radius:6px;padding:
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ac);color:var(--ac-txt);font-weight:800;padding:12px 20px;border-radius:14px;z-index:80}
 small{color:var(--mut)}
 @media (max-width:720px){.dois,.col2,.ideias{grid-template-columns:1fr}.painel-novo{padding:20px}.cota{display:none}.pl .ver{display:none}.linha{flex-direction:column}}
+
+.posts-g{display:grid;gap:16px;margin-top:16px}
+.post-i{display:grid;grid-template-columns:160px 1fr;gap:16px;align-items:start;background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:12px}
+.post-i img{width:100%;border-radius:12px;display:block}
+.post-i p{margin:6px 0;font-size:14px;color:var(--mut)}
+.kit{margin-top:32px}
+.kit-lista{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:16px}
+.kit-lista img,.kit-lista video{width:100%;border-radius:12px;display:block;background:#000}
+@media (max-width:640px){.post-i{grid-template-columns:1fr}}
