@@ -45,7 +45,9 @@ button.pl:hover{border-color:var(--ac);transform:translateY(-2px)}
 .abas-p{display:flex;gap:6px;overflow-x:auto;margin:24px 0;padding-bottom:4px;scrollbar-width:none}
 .abas-p button{flex:none;background:var(--card);border:1px solid var(--bd);color:var(--mut);border-radius:999px;padding:9px 16px;font:700 14px system-ui;cursor:pointer}
 .abas-p button.on{background:var(--ac);color:var(--ac-txt);border-color:var(--ac)}
-.conteudo{display:grid;gap:12px}
+.conteudo{display:grid;gap:12px;min-width:0}
+.conteudo>*{min-width:0}
+.folha-c{overflow-x:hidden}
 .bl{background:var(--card);border:1px solid var(--bd);border-radius:18px;padding:20px}
 .bl.dest{border-color:rgba(180,107,255,.45);background:linear-gradient(180deg,rgba(180,107,255,.08),var(--card))}
 .bl strong{font-family:"Display",sans-serif;font-size:16px}

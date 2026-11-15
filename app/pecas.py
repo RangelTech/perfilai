@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import html
 import io
-import textwrap
 import zipfile
 from pathlib import Path
 
@@ -21,13 +20,23 @@ def _hex(c: str) -> tuple[int, int, int]:
         return (180, 107, 255)
 
 
-def _texto(d: ImageDraw.ImageDraw, txt: str, tam: int, largura: int, y: int, cor, max_linhas: int = 9) -> int:
+def _texto(d: ImageDraw.ImageDraw, txt: str, tam: int, largura: int, y: int | None, cor, max_linhas: int = 9) -> int:
+    """Quebra pelo tamanho real da fonte; y=None centraliza o bloco na altura da lâmina."""
     f = ImageFont.truetype(str(FONTE), tam)
-    chars = max(8, int(largura / (tam * 0.58)))
-    linhas = textwrap.wrap(txt, chars)[:max_linhas]
+    linhas: list[str] = []
+    for palavra in txt.split():
+        teste = (linhas[-1] + " " + palavra) if linhas else palavra
+        if linhas and d.textlength(teste, font=f) <= largura:
+            linhas[-1] = teste
+        else:
+            linhas.append(palavra)
+    linhas = linhas[:max_linhas]
+    passo = int(tam * 1.28)
+    if y is None:
+        y = (H - passo * len(linhas)) // 2
     for l in linhas:
         d.text((90, y), l, font=f, fill=cor)
-        y += int(tam * 1.25)
+        y += passo
     return y
 
 
@@ -44,7 +53,8 @@ def carrossel(c: dict, arroba: str, cor: str, pasta: Path, n: int) -> list[str]:
         fg = (255, 255, 255) if capa else (240, 240, 245)
         if not capa:
             d.rectangle([90, 120, 210, 132], fill=rgb)
-        _texto(d, txt, 92 if capa else 60, W - 180, 300 if capa else 220, fg, 8 if capa else 12)
+        tam = (96 if len(txt) < 40 else 84) if capa else (72 if len(txt) < 90 else 62)
+        _texto(d, txt, tam, W - 180, None, fg, 8 if capa else 12)
         pe = ImageFont.truetype(str(FONTE), 34)
         d.text((90, H - 120), f"@{arroba}" if arroba else "", font=pe, fill=fg if capa else rgb)
         d.text((W - 200, H - 120), f"{i}/{len(laminas)}" if not capa else "arraste →", font=pe, fill=fg)
