@@ -39,7 +39,7 @@
   $('#f-plano').onsubmit = async (e) => {
     e.preventDefault(); const b = $('#b-gerar'); b.disabled = true; msg('')
     try {
-      await api('/api/planos', { method: 'POST', body: JSON.stringify({ arroba: $('#arroba').value, nicho: $('#nicho').value, objetivo: $('#objetivo').value, produto: $('#produto').value, cor: $('#cor').value, prints }) })
+      await api('/api/planos', { method: 'POST', body: JSON.stringify({ arroba: $('#arroba').value, nicho: $('#nicho').value, objetivo: $('#objetivo').value, produto: $('#produto').value, cor: $('#cor').value, prints, curriculo_texto: ($('#curriculo') || {}).value || '' }) })
       msg('Recebido! A IA já está montando o seu plano.', 'ok'); prints = []; $('#previas').innerHTML = ''; $('#prints').value = ''
       listar(); carregarConta()
     } catch (err) { msg(err.message) } finally { b.disabled = false }
@@ -58,7 +58,10 @@
     if (planos.some((p) => p.estado === 'fila' || p.estado === 'rodando')) tm = setTimeout(listar, 4000)
   }
   const bloco = (titulo, texto) => `<div class="bl"><div class="bl-t"><strong>${esc(titulo)}</strong><button class="copiar" data-copiar="${esc(texto)}">Copiar</button></div><p>${esc(texto).replace(/\n/g, '<br>')}</p></div>`
-  const ABAS = [['raio', 'Raio-x'], ['bios', 'Bios'], ['ideias', '30 ideias'], ['posts', 'Posts da semana'], ['roteiros', 'Roteiros'], ['stories', 'Stories'], ['carrosseis', 'Carrosséis'], ['site', 'Site'], ['nicho', 'Nicho'], ['renda', 'Renda extra']]
+  const MK = window.MARCA || { rede: 'instagram', rotulo_bio: 'Bio' }
+  const ABAS = MK.rede === 'linkedin'
+    ? [['raio', 'Raio-x'], ['bios', 'Títulos'], ['lkd', 'Perfil completo'], ['ideias', '30 ideias'], ['posts', 'Posts da semana'], ['renda', 'Renda extra']]
+    : [['raio', 'Raio-x'], ['bios', MK.rotulo_bio + 's'], ['ideias', '30 ideias'], ['posts', 'Posts da semana'], ['roteiros', 'Roteiros'], ['stories', 'Stories'], ['carrosseis', 'Carrosséis'], ['site', 'Site'], ['nicho', 'Nicho'], ['renda', 'Renda extra']]
   function render(p, aba) {
     const r = p.resultado, rx = r.raio_x || {}, est = r.estrategia || {}
     const corpo = {
@@ -66,7 +69,18 @@
         <div class="col2"><div class="bl"><strong>Pontos fortes</strong><ul>${(rx.fortes || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div><div class="bl"><strong>Pontos fracos</strong><ul>${(rx.fracos || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div></div>
         <div class="bl dest"><strong>As 3 mudanças que mais trazem resultado</strong><ol>${(rx.prioridades || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>
         <div class="bl"><strong>Estratégia</strong><p><b>Posicionamento:</b> ${esc(est.posicionamento)}</p><p><b>Pilares:</b> ${esc((est.pilares || []).join(' · '))}</p><p><b>Frequência:</b> ${esc(est.frequencia)}</p><ul>${(est.formatos || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`,
-      bios: () => (r.bios || []).map((b, i) => bloco('Bio ' + (i + 1), b)).join(''),
+      bios: () => (r.bios || []).map((b, i) => bloco((MK.rede === 'linkedin' ? 'Título ' : MK.rotulo_bio + ' ') + (i + 1), b)).join(''),
+      lkd: () => { const L = r.linkedin || {}; return (L.sobre || []).length || (L.experiencias || []).length ? `
+        ${(L.sobre || []).map((x, i) => bloco(['Sobre para vaga', 'Sobre para clientes', 'Sobre para autoridade'][i] || 'Sobre ' + (i + 1), x)).join('')}
+        ${(L.experiencias || []).map((x) => bloco(`${x.cargo} · ${x.empresa}${x.periodo ? ' · ' + x.periodo : ''}${x.origem === 'curriculo' ? ' (do currículo)' : ''}`, x.descricao)).join('')}
+        ${(L.competencias || []).length ? bloco('Competências (nesta ordem)', L.competencias.join(', ')) : ''}
+        ${(L.palavras_chave || []).length ? bloco('Palavras que recrutadores buscam', L.palavras_chave.join(', ')) : ''}
+        ${(L.faltando_no_linkedin || []).length ? `<div class="bl dest"><strong>Está no currículo e falta no LinkedIn</strong><ul>${L.faltando_no_linkedin.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+        <div class="bl"><strong>Onde colar cada parte (modo guiado)</strong><ol>
+          <li>Título: <a href="https://www.linkedin.com/in/me/edit/intro/" target="_blank" rel="noopener">editar a introdução</a></li>
+          <li>Sobre: <a href="https://www.linkedin.com/in/me/add-edit/SUMMARY/" target="_blank" rel="noopener">editar o Sobre</a></li>
+          <li>Experiências: <a href="https://www.linkedin.com/in/me/details/experience/" target="_blank" rel="noopener">lista de experiências</a> (ou <a href="https://www.linkedin.com/in/me/add-edit/POSITION/" target="_blank" rel="noopener">adicionar cargo</a>)</li>
+          <li>Competências: <a href="https://www.linkedin.com/in/me/details/skills/" target="_blank" rel="noopener">competências</a></li></ol></div>` : '<div class="vazio">Gere um plano novo com o seu currículo para ver o perfil completo.</div>' },
       ideias: () => `<div class="filtro">${['todas', 'reels', 'stories', 'carrossel', 'post'].map((f, i) => `<button class="${i === 0 ? 'on' : ''}" data-filtro="${f}">${f[0].toUpperCase() + f.slice(1)}</button>`).join('')}</div>
         <div class="ideias">${(r.ideias || []).map((x, i) => `<div class="id" data-f="${esc(x.formato)}"><span class="fmt">${esc(x.formato)}</span><b>“${esc(x.gancho)}”</b><p>${esc(x.ideia)}</p><button class="copiar" data-copiar="${esc(x.gancho + ' ' + x.ideia)}">Copiar</button></div>`).join('')}</div>`,
       roteiros: () => (r.roteiros || []).map((x) => `<div class="bl"><div class="bl-t"><strong>${esc(x.titulo)}</strong><button class="copiar" data-copiar="${esc([x.gancho, ...(x.cenas || []), x.legenda, (x.hashtags || []).join(' ')].join('\n'))}">Copiar</button></div>
@@ -150,4 +164,33 @@
     x.send(f)
   }
   listar()
+})()
+
+// Linkdn AI: currículo por arquivo, texto ou áudio
+;(() => {
+  const M = window.MARCA || {}
+  const box = document.getElementById('bloco-cv'); if (!box || M.rede !== 'linkedin') return
+  box.hidden = false
+  const info = document.getElementById('cv-info'), ta = document.getElementById('curriculo')
+  async function enviar(blob, nome) {
+    info.textContent = 'Lendo…'
+    const r = await fetch('/api/curriculo', { method: 'POST', headers: { 'x-arquivo': nome }, body: blob })
+    let j = {}; try { j = await r.json() } catch {}
+    if (!r.ok) { info.textContent = typeof j.detail === 'string' ? j.detail : 'Não deu certo.'; return }
+    ta.value = (ta.value ? ta.value + '\n\n' : '') + j.texto; info.textContent = 'Pronto: confira e corrija o texto antes de gerar.'
+  }
+  document.getElementById('arq-cv').onchange = (e) => { const f = e.target.files[0]; if (f) enviar(f, f.name) }
+  let rec = null, partes = []
+  document.getElementById('b-gravar').onclick = async (e) => {
+    const b = e.currentTarget
+    if (rec) { rec.stop(); return }
+    try {
+      const st = await navigator.mediaDevices.getUserMedia({ audio: true })
+      rec = new MediaRecorder(st); partes = []
+      rec.ondataavailable = (ev) => partes.push(ev.data)
+      rec.onstop = () => { st.getTracks().forEach((t) => t.stop()); b.textContent = 'Gravar áudio'; const blob = new Blob(partes, { type: rec.mimeType }); rec = null; enviar(blob, 'fala.webm') }
+      rec.start(); b.textContent = 'Parar e transcrever'; info.textContent = 'Gravando… conte cargos, empresas, datas e resultados (até 10 min).'
+      setTimeout(() => rec && rec.state === 'recording' && rec.stop(), 600000)
+    } catch { info.textContent = 'Não consegui usar o microfone.' }
+  }
 })()

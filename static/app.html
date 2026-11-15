@@ -2,13 +2,15 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Perfilaí: meus planos</title>
+<title>{{NOME}}: meus planos</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%23b46bff'/><circle cx='16' cy='16' r='7' fill='none' stroke='white' stroke-width='3'/></svg>">
 <link rel="stylesheet" href="/s/base.css"><link rel="stylesheet" href="/s/app.css">
+<style>:root{--ac:{{COR}};--ac2:{{COR2}}}</style>
+<script>window.MARCA = {{MARCA_JSON}}</script>
 </head>
 <body>
 <header class="topo"><div class="w topo-c">
-  <a class="marca" href="/app"><i><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/></svg></i>Perfil<span>aí</span></a>
+  <a class="marca" href="/app"><i><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/></svg></i>{{NOME}}</a>
   <nav><span id="cota" class="cota"></span><a class="btn btn-sec" id="b-cortai" hidden target="_blank" rel="noopener">Editar Reels no Cortaí</a><button class="btn btn-sec" onclick="SBTour.abrir()">Tour</button><button class="btn btn-sec" data-senha>Senha</button><button class="btn btn-sec" id="sair">Sair</button></nav>
 </div></header>
 
@@ -18,11 +20,17 @@
     <p class="sub-p">Quanto mais você contar, melhor o plano. O print é opcional, mas deixa o raio-x muito mais certeiro.</p>
     <div id="sem-plano" hidden class="aviso">Você ainda não tem um plano ativo. <a href="/#preco">Ver planos</a></div>
     <form id="f-plano" class="form">
-      <div class="dois"><div><label for="arroba">@ do perfil</label><input id="arroba" required placeholder="@seuperfil" autocomplete="off"></div>
+      <div class="dois"><div><label for="arroba">{{CAMPO_PERFIL}}</label><input id="arroba" required placeholder="{{EXEMPLO_PERFIL}}" autocomplete="off"></div>
         <div><label for="nicho">Nicho</label><input id="nicho" placeholder="Ex.: confeitaria, estética, advocacia"></div></div>
-      <label for="objetivo">O que você quer com o Instagram?</label><textarea id="objetivo" rows="2" required maxlength="300" placeholder="Ex.: vender meu curso de bolo no pote para mulheres que querem renda extra"></textarea>
+      <label for="objetivo">O que você quer com o {{REDE_NOME}}?</label><textarea id="objetivo" rows="2" required maxlength="300" placeholder="Ex.: vender meu curso de bolo no pote para mulheres que querem renda extra"></textarea>
       <div class="dois"><div><label for="produto">Produto ou serviço</label><input id="produto" maxlength="200" placeholder="Ex.: curso online de R$ 97"></div>
         <div><label for="cor">Cor da marca</label><input id="cor" type="color" value="#b46bff" class="cor"></div></div>
+      <div id="bloco-cv" hidden>
+        <label for="curriculo">Seu currículo (o LinkedIn novo nasce dele)</label>
+        <textarea id="curriculo" rows="5" maxlength="12000" placeholder="Cole aqui, suba o arquivo ou grave um áudio contando a sua trajetória: cargos, empresas, datas, resultados, ferramentas, formação."></textarea>
+        <div class="linha-cv"><label class="btn btn-sec" for="arq-cv">Subir PDF ou Word<input id="arq-cv" type="file" accept=".pdf,.docx,.txt,application/pdf" hidden></label>
+          <button class="btn btn-sec" type="button" id="b-gravar">Gravar áudio</button><span id="cv-info" class="sub-p"></span></div>
+      </div>
       <label>Prints do perfil (até 3)</label>
       <label class="soltar" for="prints"><input id="prints" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
         <strong>Escolher prints</strong><span>Print da tela do perfil com a bio e os posts. PNG ou JPG.</span></label>

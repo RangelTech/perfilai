@@ -88,3 +88,5 @@ small{color:var(--mut)}
 .kit-lista{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-top:16px}
 .kit-lista img,.kit-lista video{width:100%;border-radius:12px;display:block;background:#000}
 @media (max-width:640px){.post-i{grid-template-columns:1fr}}
+
+.linha-cv{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0 16px}

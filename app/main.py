@@ -12,15 +12,17 @@ import shutil
 import threading
 import time
 import uuid
+
+import httpx
 from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app import senha_rotas
-from app import analise, auth, mailer, midia_perfil, pecas, rt_midia
+from app import analise, auth, mailer, marcas, midia_perfil, pecas, rt_midia
 from app.db import Banco, agora
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -160,30 +162,45 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
     def eh_demo(u: dict) -> bool:
         return bool(cfg.demo_email) and u["email"] == cfg.demo_email.lower()
 
-    def uso_semana(u: dict) -> dict:
+    def marca_de(request: Request) -> dict:
+        return marcas.por_host(request.headers.get("x-forwarded-host") or request.headers.get("host"))
+
+    def assinatura(u: dict, marca: str) -> tuple[bool, str | None]:
+        if marca == "insta":
+            return auth.assinante(u), (u.get("plano") if auth.assinante(u) else None)
+        a = db.um("SELECT * FROM assinaturas WHERE usuario=? AND marca=?", (u["id"], marca))
+        if a and a["ativo_ate"] > agora():
+            return True, a["plano"]
+        return False, None
+
+    def uso_semana(u: dict, marca: str = "insta") -> dict:
         ini = midia_perfil.inicio_semana(agora())
         linhas = db.todos("SELECT entrada FROM planos WHERE usuario=? AND criado>=? AND estado!='erro'", (u["id"], ini))
         por_conta: dict[str, int] = {}
         for l in linhas:
-            a = (json.loads(l["entrada"]).get("arroba") or "").lower()
+            e = json.loads(l["entrada"])
+            if (e.get("marca") or "insta") != marca:
+                continue
+            a = (e.get("arroba") or "").lower()
             por_conta[a] = por_conta.get(a, 0) + 1
         posts = db.um("SELECT COUNT(*) n FROM posts WHERE usuario=? AND criado>=?", (u["id"], ini))["n"]
         return {"por_conta": por_conta, "posts": posts}
 
-    def conta(u: dict) -> dict:
-        assin = auth.assinante(u)
-        pl = PLANOS.get(u.get("plano") or "start") if assin else None
-        us = uso_semana(u)
+    def conta(u: dict, marca: str = "insta") -> dict:
+        assin, plano_atual = assinatura(u, marca)
+        pl = PLANOS.get(plano_atual or "start") if assin else None
+        us = uso_semana(u, marca)
         limite = pl["contas_semana"] if pl else 0
         demo = eh_demo(u)
-        return {"email": u["email"], "assinante": assin, "plano": u.get("plano") if assin else None,
+        return {"email": u["email"], "assinante": assin, "plano": plano_atual, "marca": marca,
                 "contas_semana": len(us["por_conta"]), "limite_contas": 99 if demo else limite, "rodadas": us["por_conta"], "rodadas_por_conta": RODADAS_POR_CONTA,
                 "posts_semana": us["posts"], "limite_posts": 99 if demo else POSTS_SEMANA,
-                "restam": 99 if demo else (max(0, limite - len(us["por_conta"])) if assin else 0), "planos": planos_publicos(),
-                "cortai": cfg.cortai_url + "/?entrar=1" if assin and u.get("plano") == "turbo" else None}
+                "restam": 99 if demo else (max(0, limite - len(us["por_conta"])) if assin else 0), "planos": planos_publicos(marca),
+                "cortai": cfg.cortai_url + "/?entrar=1" if assin and plano_atual == "turbo" else None}
 
-    def planos_publicos() -> list[dict]:
-        return [{"codigo": k, **v, "checkout": cfg.checkouts.get(k) or "", "lancamento_ate": cfg.lancamento_ate} for k, v in PLANOS.items()]
+    def planos_publicos(marca: str = "insta") -> list[dict]:
+        ck = lambda k: (cfg.checkouts.get(f"{marca}:{k}") or (cfg.checkouts.get(k) if marca == "insta" else "")) or ""  # noqa: E731
+        return [{"codigo": k, **v, "checkout": ck(k), "lancamento_ate": cfg.lancamento_ate} for k, v in PLANOS.items()]
 
     def publico(p: dict) -> dict:
         out = {k: p[k] for k in ("id", "estado", "etapa", "progresso", "erro", "criado", "fim")}
@@ -239,25 +256,29 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
         return resp
 
     @app.get("/api/planos-venda")
-    def planos_venda():
-        return {"planos": planos_publicos()}
+    def planos_venda(request: Request):
+        return {"planos": planos_publicos(marca_de(request)["id"])}
 
     @app.get("/api/conta")
     def ver_conta(request: Request):
-        return conta(usuario(request))
+        return conta(usuario(request), marca_de(request)["id"])
 
     @app.post("/api/planos")
     async def novo_plano(request: Request):
         u = usuario(request)
-        c = conta(u)
+        c = conta(u, marca_de(request)["id"])
         if not c["assinante"] and not eh_demo(u):
             raise HTTPException(402, "escolha um plano para começar")
         if db.um("SELECT COUNT(*) n FROM planos WHERE usuario=? AND estado IN ('fila','rodando')", (u["id"],))["n"] >= 1:
             raise HTTPException(429, "espere o plano atual ficar pronto")
         b = await request.json()
-        arroba = re.sub(r"[^A-Za-z0-9_.]", "", str(b.get("arroba") or "").strip().lstrip("@"))[:30]
+        mk = marca_de(request)
+        if mk["rede"] in ("linkedin", "facebook"):
+            arroba = re.sub(r"[^A-Za-z0-9_./:@-]", "", str(b.get("arroba") or "").strip())[:120]
+        else:
+            arroba = re.sub(r"[^A-Za-z0-9_.]", "", str(b.get("arroba") or "").strip().lstrip("@"))[:30]
         if not arroba:
-            raise HTTPException(422, "informe o @ do perfil")
+            raise HTTPException(422, "informe o " + mk["campo_perfil"].lower())
         if not eh_demo(u):
             ja = c["rodadas"].get(arroba.lower(), 0)
             if ja == 0 and c["contas_semana"] >= c["limite_contas"]:
@@ -286,7 +307,8 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
             (pasta / f"print{i}.{ext}").write_bytes(bruto)
             nomes.append(f"print{i}.{ext}")
         entrada = {"arroba": arroba, "objetivo": objetivo, "nicho": str(b.get("nicho") or "").strip()[:80],
-                   "produto": str(b.get("produto") or "").strip()[:200], "cor": cor, "prints": nomes}
+                   "produto": str(b.get("produto") or "").strip()[:200], "cor": cor, "prints": nomes, "marca": mk["id"],
+                   "curriculo_texto": str(b.get("curriculo_texto") or "").strip()[:12000]}
         db.exec("INSERT INTO planos(id,usuario,entrada,criado) VALUES(?,?,?,?)", (pid, u["id"], json.dumps(entrada, ensure_ascii=False), agora()))
         return publico(db.um("SELECT * FROM planos WHERE id=?", (pid,)))
 
@@ -351,7 +373,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
         p = db.um("SELECT * FROM planos WHERE id=? AND usuario=?", (pid, u["id"]))
         if not p or p["estado"] != "pronto":
             raise HTTPException(404, "plano não encontrado ou ainda não ficou pronto")
-        c = conta(u)
+        c = conta(u, marca_de(request)["id"])
         if not c["assinante"] and not eh_demo(u):
             raise HTTPException(402, "escolha um plano para gerar posts")
         dia = midia_perfil.hoje(agora())
@@ -404,7 +426,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
     async def novo_kit(request: Request):
         """Corpo cru (foto ou vídeo até 2 min / 200 MB), nome no cabeçalho x-arquivo, @ e cor em x-arroba / x-cor."""
         u = usuario(request)
-        c = conta(u)
+        c = conta(u, marca_de(request)["id"])
         if not c["assinante"] and not eh_demo(u):
             raise HTTPException(402, "escolha um plano para usar o kit de marca")
         nome = request.headers.get("x-arquivo") or "foto.jpg"
@@ -471,15 +493,31 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
             return {"ok": True, "ignorado": "sem email"}
         u = auth.usuario_por_email(db, email)
         if evento in ("purchase_approved", "subscription_renewed", "subscription_created"):
-            plano = cfg.planos_por_produto.get(str((dados.get("product") or {}).get("id") or ""), "start")
-            db.exec("UPDATE usuarios SET plano=?, ativo_ate=?, pedido=? WHERE id=?", (plano, max(agora(), u["ativo_ate"]) + 32 * 86400, str(dados.get("id") or ""), u["id"]))
+            alvo = cfg.planos_por_produto.get(str((dados.get("product") or {}).get("id") or ""), "start")
+            marca, _, plano = alvo.rpartition(":")
+            marca = marca or "insta"
+            if marca == "insta":
+                db.exec("UPDATE usuarios SET plano=?, ativo_ate=?, pedido=? WHERE id=?", (plano, max(agora(), u["ativo_ate"]) + 32 * 86400, str(dados.get("id") or ""), u["id"]))
+            else:
+                atual = db.um("SELECT ativo_ate FROM assinaturas WHERE usuario=? AND marca=?", (u["id"], marca))
+                ate = max(agora(), atual["ativo_ate"] if atual else 0) + 32 * 86400
+                db.exec("INSERT INTO assinaturas(usuario,marca,plano,ativo_ate,pedido) VALUES(?,?,?,?,?) ON CONFLICT(usuario,marca) DO UPDATE SET plano=excluded.plano, "
+                        "ativo_ate=excluded.ativo_ate, pedido=excluded.pedido", (u["id"], marca, plano, ate, str(dados.get("id") or "")))
             cortai = ponte_cortai(cfg, email, 32) if plano == "turbo" else None
-            return {"ok": True, "liberado": email, **({"cortai": cortai} if cortai is not None else {})}
+            return {"ok": True, "liberado": email, "marca": marca, **({"cortai": cortai} if cortai is not None else {})}
         if evento in ("refund", "chargeback", "subscription_canceled", "subscription_cancelled"):
-            db.exec("UPDATE usuarios SET ativo_ate=? WHERE id=?", (agora(), u["id"]))
-            if u.get("plano") == "turbo":
+            alvo = cfg.planos_por_produto.get(str((dados.get("product") or {}).get("id") or ""), "")
+            marca = alvo.rpartition(":")[0] or "insta"
+            if marca == "insta":
+                era_turbo = u.get("plano") == "turbo"
+                db.exec("UPDATE usuarios SET ativo_ate=? WHERE id=?", (agora(), u["id"]))
+            else:
+                a_ = db.um("SELECT plano FROM assinaturas WHERE usuario=? AND marca=?", (u["id"], marca))
+                era_turbo = bool(a_) and a_["plano"] == "turbo"
+                db.exec("UPDATE assinaturas SET ativo_ate=? WHERE usuario=? AND marca=?", (agora(), u["id"], marca))
+            if era_turbo:
                 ponte_cortai(cfg, email, 0)
-            return {"ok": True, "revogado": email}
+            return {"ok": True, "revogado": email, "marca": marca}
         return {"ok": True, "ignorado": evento}
 
     # ------------------------------------------------ admin
@@ -506,15 +544,70 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
             l["ativo"] = l["ativo_ate"] > agora()
         return {"assinantes": linhas}
 
+    def com_marca(arquivo: str, request: Request) -> HTMLResponse:
+        m = marca_de(request)
+        h = (ESTATICO / arquivo).read_text(encoding="utf-8")
+        pub = marcas.publica(m)
+        h = h.replace("{{MARCA_JSON}}", json.dumps(pub, ensure_ascii=False).replace("</", "<\\/"))
+        for k in ("nome", "rede_nome", "cor", "cor2", "titulo_pagina", "promessa", "campo_perfil", "exemplo_perfil", "rotulo_bio"):
+            h = h.replace("{{" + k.upper() + "}}", str(pub[k]))
+        return HTMLResponse(h)
+
+    @app.get("/api/marca")
+    def marca_atual(request: Request):
+        return marcas.publica(marca_de(request))
+
     @app.get("/")
-    def inicio():
-        return FileResponse(ESTATICO / "index.html")
+    def inicio(request: Request):
+        return com_marca("index.html", request)
 
     @app.get("/app")
     def painel(request: Request):
         if not usuario(request, obrigatorio=False):
             return RedirectResponse("/?entrar=1", status_code=303)
-        return FileResponse(ESTATICO / "app.html")
+        return com_marca("app.html", request)
+
+    @app.post("/api/curriculo")
+    async def curriculo(request: Request):
+        """PDF, DOCX, TXT ou áudio (gravação) -> texto do currículo. Corpo cru, nome em x-arquivo. Nada fica guardado."""
+        usuario(request)
+        nome = (request.headers.get("x-arquivo") or "curriculo.pdf").lower()
+        ext = nome.rsplit(".", 1)[-1] if "." in nome else "pdf"
+        bruto = await request.body()
+        if len(bruto) > 15 * 1024 * 1024:
+            raise HTTPException(413, "o arquivo passa de 15 MB")
+        if len(bruto) < 50:
+            raise HTTPException(422, "o arquivo chegou vazio")
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / f"c.{ext}"
+            f.write_bytes(bruto)
+            try:
+                if ext == "pdf":
+                    from pypdf import PdfReader
+                    texto = "\n".join((pg.extract_text() or "") for pg in PdfReader(str(f)).pages[:12])
+                elif ext == "docx":
+                    import docx
+                    texto = "\n".join(par.text for par in docx.Document(str(f)).paragraphs)
+                elif ext in ("txt", "md"):
+                    texto = bruto.decode("utf-8", "replace")
+                elif ext in ("webm", "ogg", "mp3", "m4a", "wav", "mp4"):
+                    with httpx.Client() as c:
+                        r = c.post(cfg.llm_base + "/audio/transcriptions", headers={"Authorization": f"Bearer {cfg.llm_key}"},
+                                   files={"file": (f.name, bruto, "application/octet-stream")}, data={"model": "whisper-1", "language": "pt"}, timeout=180)
+                        r.raise_for_status()
+                        texto = r.json().get("text") or ""
+                else:
+                    raise HTTPException(422, "mande PDF, DOCX, TXT ou um áudio")
+            except HTTPException:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.warning("curriculo: %s", e)
+                raise HTTPException(422, "não consegui ler esse arquivo; tente outro formato ou cole o texto")
+        texto = re.sub(r"[ \t]+", " ", texto).strip()
+        if len(texto) < 30:
+            raise HTTPException(422, "não achei texto nesse arquivo (PDF escaneado?); cole o texto ou grave um áudio contando a sua trajetória")
+        return {"texto": texto[:12000], "caracteres": len(texto)}
 
     app.mount("/s", StaticFiles(directory=ESTATICO), name="estatico")
     return app
