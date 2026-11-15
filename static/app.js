@@ -104,7 +104,7 @@
   document.addEventListener('click', async (e) => {
     const bp = e.target.closest('#b-post')
     if (bp) {
-      bp.disabled = true; bp.textContent = 'Criando a imagem… (até 1 minuto)'
+      bp.disabled = true; bp.textContent = 'Criando a imagem… (até 3 minutos)'
       const m = $('#post-msg')
       try { await api('/api/planos/' + bp.dataset.plano + '/post', { method: 'POST' }); m.textContent = 'Post de hoje pronto.'; m.className = 'msg ok'; carregarPosts(); carregarConta() }
       catch (err) { m.textContent = err.message; m.className = 'msg erro' } finally { bp.disabled = false; bp.textContent = 'Gerar o post de hoje' }
