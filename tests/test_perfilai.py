@@ -48,7 +48,8 @@ def test_sem_plano_nao_gera(cli):
 
 
 def test_plano_completo_com_print(cli, monkeypatch):
-    c, app = cli
+    c, _ = cli
+    app = c.app
     entrar(c); assinar(c)
     assert c.get("/api/conta").json()["limite"] == 6
     r = c.post("/api/planos", json={"arroba": "@doces.da.ana", "objetivo": "vender bolo no pote", "nicho": "confeitaria", "cor": "#ff5fa2", "prints": [PRINT]})
@@ -79,7 +80,8 @@ def test_demo_entra_com_senha_e_e_turbo(cli):
 
 
 def test_turbo_libera_cortai(cli, monkeypatch):
-    c, app = cli
+    c, _ = cli
+    app = c.app
     chamadas = []
     monkeypatch.setattr(main, "ponte_cortai", lambda cfg, email, dias: chamadas.append((email, dias)) or True)
     r = c.post("/api/cakto", json={"secret": "ck", "event": "purchase_approved", "data": {"id": "t1", "customer": {"email": "t@x.com"}, "product": {"id": "p-turbo"}}})
@@ -111,3 +113,51 @@ def test_analise_diretor_e_redator(monkeypatch):
     r = analise.plano(Config(), {"arroba": "ana", "objetivo": "vender"}, [], lambda e, p: None)
     assert [m for m, _ in chamadas] == ["rt-planejar", "rt-geral", "rt-geral", "rt-geral"] and all("TOM-CARINHOSO" in x for _, x in chamadas[1:])
     assert len(r["ideias"]) == 30 and len(r["bios"]) == 3 and len(r["referencias"]) == 3
+
+
+# ---------------------------------------------------------------- senha (padrão), código (opção), esqueci a senha
+def test_senha_criar_entrar_trocar_e_esqueci(cli):
+    from fastapi.testclient import TestClient
+    c, _ = cli
+    app = c.app
+    em = "senha@exemplo.com"
+    entrar(c, em)
+    assert c.get("/api/senha").json()["tem_senha"] is False
+    assert c.post("/api/senha", json={"senha": "curta"}).status_code == 422
+    assert c.post("/api/senha", json={"senha": "boa-senha-1"}).status_code == 200
+    assert c.get("/api/senha").json()["tem_senha"] is True
+    # trocar exige a atual
+    assert c.post("/api/senha", json={"senha": "outra-senha", "atual": "errada"}).status_code == 400
+    assert c.post("/api/senha", json={"senha": "outra-senha", "atual": "boa-senha-1"}).status_code == 200
+    # entrar com senha num cliente novo (sem cookie)
+    n = TestClient(app)
+    assert n.post("/api/entrar/senha", json={"email": em, "senha": "boa-senha-1"}).status_code == 400
+    r = n.post("/api/entrar/senha", json={"email": em, "senha": "outra-senha"})
+    assert r.status_code == 200 and n.get("/api/senha").status_code == 200
+    # conta sem senha recebe dica de usar o código
+    entrar(TestClient(app), "semsenha@exemplo.com")
+    r = TestClient(app).post("/api/entrar/senha", json={"email": "semsenha@exemplo.com", "senha": "qualquer1"})
+    assert r.status_code == 400 and "código" in r.json()["detail"]
+    # esqueci a senha: código separado do login, troca a senha e já entra
+    e = TestClient(app)
+    j = e.post("/api/senha/esqueci", json={"email": em}).json()
+    assert e.post("/api/senha/redefinir", json={"email": em, "codigo": "000000" if j["codigo_dev"] != "000000" else "111111", "senha": "nova-senha-9"}).status_code == 400
+    j = None
+    import app.auth as A
+    A.REENVIO_MIN_S = 0
+    j = e.post("/api/senha/esqueci", json={"email": em}).json()
+    assert e.post("/api/senha/redefinir", json={"email": em, "codigo": j["codigo_dev"], "senha": "nova-senha-9"}).status_code == 200
+    assert e.get("/api/senha").json()["tem_senha"] is True
+    assert TestClient(app).post("/api/entrar/senha", json={"email": em, "senha": "nova-senha-9"}).status_code == 200
+    # e-mail sem conta: mesma resposta, sem código
+    assert "codigo_dev" not in e.post("/api/senha/esqueci", json={"email": "ninguem@exemplo.com"}).json()
+
+
+def test_senha_bloqueia_depois_de_muitos_erros(cli):
+    from app import senha_rotas
+    c, _ = cli
+    senha_rotas._erros.clear()
+    for _ in range(senha_rotas.MAX_ERROS):
+        c.post("/api/entrar/senha", json={"email": "forca@exemplo.com", "senha": "x"})
+    assert c.post("/api/entrar/senha", json={"email": "forca@exemplo.com", "senha": "x"}).status_code == 429
+    senha_rotas._erros.clear()

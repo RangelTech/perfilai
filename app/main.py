@@ -19,6 +19,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app import senha_rotas
 from app import analise, auth, mailer, pecas
 from app.db import Banco, agora
 
@@ -214,14 +215,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
             raise HTTPException(400, {"invalido": "código errado", "expirado": "código vencido; peça outro", "tentativas": "muitas tentativas; peça outro código"}[r])
         return _login(auth.usuario_por_email(db, email))
 
-    @app.post("/api/entrar/senha")
-    async def entrar_senha(request: Request):
-        """Só a conta de DEMONSTRAÇÃO entra com senha; clientes entram pelo código no e-mail."""
-        b = await request.json()
-        email = auth.normalizar_email(b.get("email"))
-        if not (cfg.demo_email and cfg.demo_senha and email == cfg.demo_email.lower() and hmac.compare_digest(str(b.get("senha") or ""), cfg.demo_senha)):
-            raise HTTPException(400, "e-mail ou senha incorretos (a senha vale só para a conta de demonstração)")
-        return _login(auth.usuario_por_email(db, email))
+    senha_rotas.registrar(app, db, cfg, mailer, _login, usuario)  # senha (padrão), código (opção), esqueci a senha
 
     @app.post("/api/sair")
     def sair(request: Request):
