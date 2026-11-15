@@ -67,6 +67,8 @@ class Config:
     demo_senha: str = ""
     cortai_url: str = "https://cortai.rangeltech.net"
     cortai_admin_key: str = ""            # ponte: Turbo inclui o Cortaí Pro com o mesmo e-mail
+    pn_url: str = "http://perfil-navegador:8000"   # conexão real com a rede (spec 44 3.3.3), sempre pelo proxy SP
+    pn_token: str = ""
 
     def __post_init__(self):
         self.checkouts = self.checkouts or {}
@@ -84,7 +86,8 @@ def carregar() -> Config:
                   dev=e("PERFILAI_DEV", "") == "1", checkouts=json.loads(e("PERFILAI_CHECKOUTS", "") or "{}"),
                   planos_por_produto=json.loads(e("PERFILAI_PLANOS_CAKTO", "") or "{}"), lancamento_ate=e("PERFILAI_LANCAMENTO_ATE", "2026-11-30"),
                   admin_key=e("PERFILAI_ADMIN_KEY", ""), demo_email=e("PERFILAI_DEMO_EMAIL", ""), demo_senha=e("PERFILAI_DEMO_SENHA", ""),
-                  cortai_admin_key=e("PERFILAI_CORTAI_ADMIN_KEY", ""))
+                  cortai_admin_key=e("PERFILAI_CORTAI_ADMIN_KEY", ""),
+                  pn_url=e("PERFILAI_PN_URL", "http://perfil-navegador:8000"), pn_token=e("PERFILAI_PN_TOKEN", ""))
 
 
 def ponte_cortai(cfg: Config, email: str, dias: int) -> bool:
@@ -141,12 +144,14 @@ def _fila(db: Banco, cfg: Config, parar: threading.Event) -> None:
         processar(db, cfg, p)
 
 
-def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
+def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> FastAPI:
     cfg = cfg or carregar()
     Path(cfg.dados).mkdir(parents=True, exist_ok=True)
     db = Banco(os.path.join(cfg.dados, "perfilai.db"))
     app = FastAPI(title="Perfilaí", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.cfg, app.state.db = cfg, db
+    if pn is not None:
+        app.state.pn = pn
     if cfg.demo_email:
         u = auth.usuario_por_email(db, cfg.demo_email.lower())
         db.exec("UPDATE usuarios SET plano='turbo', ativo_ate=? WHERE id=?", (agora() + 3650 * 86400, u["id"]))
@@ -582,6 +587,149 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
             tmp.unlink(missing_ok=True)
         db.exec("INSERT INTO kits(id,usuario,arquivo,tipo,criado) VALUES(?,?,?,?,?)", (novo, u["id"], saida, "foto" if foto else "video", agora()))
         return {"id": novo, "tipo": "foto" if foto else "video", "url": f"/api/kit/{saida}"}
+
+    # ------------------------------------------------ conexão real (spec 44 3.3.3): sessão vale na semana e some ao aplicar
+    from app.pn import PN, PNErro
+    pn = app.state.pn if hasattr(app.state, "pn") else PN(cfg.pn_url, cfg.pn_token)
+
+    def chave_pn(u: dict, marca: str) -> str:
+        return f"perfilai:{u['id']}:{marca}"
+
+    def conexao(u: dict, marca: str) -> dict | None:
+        c = db.um("SELECT * FROM conexoes WHERE usuario=? AND marca=?", (u["id"], marca))
+        if c and c["estado"] in ("conectada", "conectando") and c["semana"] < midia_perfil.inicio_semana(agora()):
+            try:
+                pn.apagar(chave_pn(u, marca))
+            except PNErro:
+                pass
+            db.exec("UPDATE conexoes SET estado='expirou', login_id=NULL WHERE usuario=? AND marca=?", (u["id"], marca))
+            c = db.um("SELECT * FROM conexoes WHERE usuario=? AND marca=?", (u["id"], marca))
+        return c
+
+    def vista_conexao(u: dict, marca: str, r: dict | None = None) -> dict:
+        passo = (r or {}).get("passo") or {}
+        if passo.get("tipo") == "conectado":
+            db.exec("UPDATE conexoes SET estado='conectada', login_id=NULL WHERE usuario=? AND marca=?", (u["id"], marca))
+        elif passo.get("tipo") == "erro":
+            db.exec("UPDATE conexoes SET estado='desconectada', login_id=NULL WHERE usuario=? AND marca=?", (u["id"], marca))
+        c = conexao(u, marca) or {"estado": "desconectada", "rotulo": "", "aplicada": None}
+        return {"estado": c["estado"], "rotulo": c["rotulo"], "aplicada": c.get("aplicada"), "passo": passo or None}
+
+    def erro_pn(e):
+        raise HTTPException(e.status if 400 <= e.status < 600 else 502, e.mensagem)
+
+    @app.get("/api/conexao")
+    def conexao_get(request: Request):
+        u = usuario(request)
+        return vista_conexao(u, marca_de(request)["id"])
+
+    @app.post("/api/conexao")
+    async def conexao_nova(request: Request):
+        u = usuario(request)
+        m = marca_de(request)
+        b = await request.json()
+        if not assinatura(u, m["id"])[0] and not eh_demo(u):
+            raise HTTPException(402, "escolha um plano para conectar e aplicar")
+        c = conexao(u, m["id"])
+        if c and c["estado"] == "aplicada" and c["semana"] >= midia_perfil.inicio_semana(agora()):
+            raise HTTPException(429, "você já aplicou as mudanças desta semana; a próxima rodada abre na segunda")
+        if not b.get("aceite"):
+            raise HTTPException(422, "aceite os termos para continuar")
+        usuario_rede, senha = str(b.get("usuario") or "").strip()[:120], str(b.get("senha") or "")
+        if m["rede"] != "tiktok" and (not usuario_rede or not senha):
+            raise HTTPException(422, "informe usuário e senha")
+        try:
+            r = pn.login(m["rede"], chave_pn(u, m["id"]), usuario_rede, senha)
+        except PNErro as e:
+            erro_pn(e)
+        del senha
+        db.exec("INSERT INTO conexoes(usuario,marca,estado,login_id,semana,rotulo,criado) VALUES(?,?,?,?,?,?,?) ON CONFLICT(usuario,marca) DO UPDATE SET "
+                "estado=excluded.estado, login_id=excluded.login_id, semana=excluded.semana, rotulo=excluded.rotulo, aplicada=NULL",
+                (u["id"], m["id"], "conectando", r.get("id"), midia_perfil.inicio_semana(agora()), usuario_rede, agora()))
+        return vista_conexao(u, m["id"], r)
+
+    @app.get("/api/conexao/login")
+    def conexao_status(request: Request):
+        u = usuario(request)
+        m = marca_de(request)["id"]
+        c = conexao(u, m)
+        if not c or not c["login_id"]:
+            return vista_conexao(u, m)
+        try:
+            return vista_conexao(u, m, pn.login_status(c["login_id"]))
+        except PNErro as e:
+            erro_pn(e)
+
+    @app.post("/api/conexao/login")
+    async def conexao_responder(request: Request):
+        u = usuario(request)
+        m = marca_de(request)["id"]
+        c = conexao(u, m)
+        if not c or not c["login_id"]:
+            raise HTTPException(409, "comece a conexão de novo")
+        valor = str((await request.json()).get("valor") or "")[:200]
+        try:
+            return vista_conexao(u, m, pn.responder(c["login_id"], valor))
+        except PNErro as e:
+            erro_pn(e)
+
+    @app.delete("/api/conexao")
+    def conexao_apagar(request: Request):
+        u = usuario(request)
+        m = marca_de(request)["id"]
+        try:
+            pn.apagar(chave_pn(u, m))
+        except PNErro:
+            pass
+        db.exec("UPDATE conexoes SET estado='desconectada', login_id=NULL WHERE usuario=? AND marca=?", (u["id"], m))
+        return {"ok": True}
+
+    @app.post("/api/conexao/perfil")
+    def conexao_perfil(request: Request):
+        """Lê o perfil real (nome, bio, link, números) pela sessão conectada."""
+        u = usuario(request)
+        m = marca_de(request)["id"]
+        c = conexao(u, m)
+        if not c or c["estado"] != "conectada":
+            raise HTTPException(409, "conecte a conta primeiro")
+        try:
+            return pn.perfil(chave_pn(u, m))
+        except PNErro as e:
+            erro_pn(e)
+
+    @app.post("/api/planos/{pid}/aplicar")
+    async def aplicar_plano(pid: str, request: Request):
+        """Aplica no perfil real o que a rede deixa mudar por fora do app (Instagram: nome, bio, link). Depois apaga a sessão."""
+        u = usuario(request)
+        m = marca_de(request)
+        p = db.um("SELECT * FROM planos WHERE id=? AND usuario=?", (pid, u["id"]))
+        if not p or p["estado"] != "pronto":
+            raise HTTPException(404, "plano não encontrado")
+        c = conexao(u, m["id"])
+        if not c or c["estado"] != "conectada":
+            raise HTTPException(409, "conecte a conta primeiro")
+        b = await request.json()
+        res = json.loads(p["resultado"])
+        proposta = {}
+        bios = res.get("bios") or []
+        i = b.get("bio")
+        if isinstance(i, int) and 0 <= i < len(bios):
+            proposta["bio"] = str(bios[i])[: int(m.get("lim_bio") or 150)]
+        for k in ("nome", "link"):
+            if isinstance(b.get(k), str) and b[k].strip():
+                proposta[k] = b[k].strip()[:200]
+        if not proposta:
+            raise HTTPException(422, "escolha o que aplicar")
+        try:
+            r = pn.aplicar(chave_pn(u, m["id"]), proposta)
+        except PNErro as e:
+            erro_pn(e)
+        try:
+            pn.apagar(chave_pn(u, m["id"]))
+        except PNErro:
+            pass
+        db.exec("UPDATE conexoes SET estado='aplicada', aplicada=?, login_id=NULL WHERE usuario=? AND marca=?", (agora(), u["id"], m["id"]))
+        return {"resultado": r, "aplicado": proposta}
 
     @app.post("/api/cakto")
     async def cakto(request: Request):

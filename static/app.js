@@ -69,7 +69,8 @@
         <div class="col2"><div class="bl"><strong>Pontos fortes</strong><ul>${(rx.fortes || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div><div class="bl"><strong>Pontos fracos</strong><ul>${(rx.fracos || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div></div>
         <div class="bl dest"><strong>As 3 mudanças que mais trazem resultado</strong><ol>${(rx.prioridades || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>
         <div class="bl"><strong>Estratégia</strong><p><b>Posicionamento:</b> ${esc(est.posicionamento)}</p><p><b>Pilares:</b> ${esc((est.pilares || []).join(' · '))}</p><p><b>Frequência:</b> ${esc(est.frequencia)}</p><ul>${(est.formatos || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`,
-      bios: () => (r.bios || []).map((b, i) => bloco((MK.rede === 'linkedin' ? 'Título ' : MK.rotulo_bio + ' ') + (i + 1), b)).join(''),
+      bios: () => (MK.rede === 'instagram' ? `<div class="bl dest"><strong>Aplicar direto no seu Instagram</strong><p>Conecte a conta (a senha vai direto para o Instagram, a partir de São Paulo, e não fica guardada) e toque em "Aplicar" na bio escolhida. Depois de aplicar, a conexão é apagada e a próxima rodada abre na segunda.</p></div>` : '') +
+        (r.bios || []).map((b, i) => bloco((MK.rede === 'linkedin' ? 'Título ' : MK.rotulo_bio + ' ') + (i + 1), b) + (MK.rede === 'instagram' ? `<button class="btn btn-pri" style="margin:-4px 0 16px" data-aplicar-bio="${i}" data-plano="${p.id}">Aplicar esta bio no Instagram</button>` : '')).join(''),
       lkd: () => { const L = r.linkedin || {}; return (L.sobre || []).length || (L.experiencias || []).length ? `
         ${(L.sobre || []).map((x, i) => bloco(['Sobre para vaga', 'Sobre para clientes', 'Sobre para autoridade'][i] || 'Sobre ' + (i + 1), x)).join('')}
         ${(L.experiencias || []).map((x) => bloco(`${x.cargo} · ${x.empresa}${x.periodo ? ' · ' + x.periodo : ''}${x.origem === 'curriculo' ? ' (do currículo)' : ''}`, x.descricao)).join('')}
@@ -224,4 +225,79 @@
   $('#b-capa').onclick = (e) => chamar('/api/imagens/capa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ frase: $('#capa-frase').value, cor: $('#img-cor').value, nicho: ($('#nicho') || {}).value || '' }) }, e.currentTarget)
   $('#b-icones').onclick = (e) => chamar('/api/imagens/icones', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ temas: $('#icones-temas').value.split(','), cor: $('#img-cor').value }) }, e.currentTarget)
   listar()
+})()
+
+// Conexão real e "Aplicar" (spec 44 3.3.3): login pelo nosso formulário, passos da rede, aplica e apaga a sessão.
+;(() => {
+  const $ = (q, r = document) => r.querySelector(q)
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+  const M = window.MARCA || { rede: 'instagram', rede_nome: 'Instagram' }
+  async function api(url, op = {}) {
+    const r = await fetch(url, { ...op, headers: { 'Content-Type': 'application/json' } })
+    let j = {}; try { j = await r.json() } catch {}
+    if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : 'Não deu certo. Tente de novo.')
+    return j
+  }
+  const post = (u, b) => api(u, { method: 'POST', body: JSON.stringify(b || {}) })
+  const modal = document.createElement('div')
+  modal.className = 'modal'; modal.hidden = true
+  modal.innerHTML = '<div class="caixa"><button class="x" data-fechar aria-label="Fechar">×</button><div id="cx-corpo"></div></div>'
+  document.body.appendChild(modal)
+  let poll = null, pendente = null
+  modal.addEventListener('click', (e) => { if (e.target === modal || e.target.closest('[data-fechar]')) { modal.hidden = true; clearTimeout(poll) } })
+  const corpo = () => $('#cx-corpo')
+
+  async function aplicar(pid, bio) {
+    corpo().innerHTML = '<h3>Aplicando…</h3><p>Mudando a bio no seu perfil.</p>'
+    try {
+      const r = await post(`/api/planos/${pid}/aplicar`, { bio })
+      const ok = Object.values(r.resultado || {}).every((v) => v === 'ok')
+      corpo().innerHTML = ok ? `<h3>Pronto!</h3><p>A bio nova já está no seu perfil:</p><div class="bl"><p>${esc(r.aplicado.bio)}</p></div><p class="dim">A conexão foi apagada. A próxima rodada abre na segunda.</p>`
+        : `<h3>Quase</h3><p>O ${esc(M.rede_nome)} não deixou mudar por fora do app. Copie a bio e cole em Editar perfil.</p>`
+    } catch (err) { corpo().innerHTML = `<h3>Não aplicou</h3><p>${esc(err.message)}</p>` }
+  }
+  function passo(r) {
+    clearTimeout(poll)
+    const p = r.passo || {}, c = corpo()
+    const responder = async (v) => { try { passo(await post('/api/conexao/login', { valor: v })) } catch (err) { alert(err.message) } }
+    const esperar = (s) => (poll = setTimeout(async () => { try { passo(await api('/api/conexao/login')) } catch {} }, Math.max(2, s || 3) * 1000))
+    if (r.estado === 'conectada' || p.tipo === 'conectado') return pendente ? aplicar(pendente.pid, pendente.bio) : (c.innerHTML = '<h3>Conectada!</h3>')
+    if (p.tipo === 'erro') { c.innerHTML = `<h3>Não conectou</h3><p>${esc(p.mensagem || 'Tente de novo.')}</p>`; return }
+    if (p.tipo === 'aprovar_no_celular') { c.innerHTML = `<h3>Confirme no celular</h3><p>${esc(p.mensagem)}</p>`; return esperar(p.espera_s) }
+    if (p.tipo === 'qr') { c.innerHTML = `<h3>Leia o QR</h3><p>${esc(p.mensagem)}</p><img src="${esc(p.imagem)}" alt="QR" style="width:100%;max-width:280px;display:block;margin:12px auto;background:#fff;border-radius:12px">`; return esperar(p.espera_s) }
+    if (p.tipo === 'escolha') { c.innerHTML = `<h3>Por onde receber o código?</h3>${(p.opcoes || []).map((o) => `<button class="btn btn-sec" style="width:100%;margin-top:8px" data-op="${esc(o)}">${esc(o)}</button>`).join('')}`; c.querySelectorAll('[data-op]').forEach((b) => (b.onclick = () => responder(b.dataset.op))); return }
+    if (p.tipo === 'captcha') {
+      c.innerHTML = `<h3>Verificação da rede</h3><p>${esc(p.mensagem)}</p><img id="cx-cap" src="${esc(p.imagem)}" alt="Verificação" style="width:100%;cursor:crosshair;border-radius:12px">`
+      $('#cx-cap').onclick = (e) => { const b = e.target.getBoundingClientRect(), k = e.target.naturalWidth / b.width; responder(`${Math.round((e.clientX - b.left) * k)},${Math.round((e.clientY - b.top) * k)}`) }
+      return
+    }
+    if (p.tipo === 'codigo_2fa' || p.tipo === 'codigo_email') {
+      c.innerHTML = `<h3>${p.tipo === 'codigo_2fa' ? 'Código de verificação' : 'Confirme que é você'}</h3><p>${esc(p.mensagem || 'Digite o código que a rede mandou.')}</p>
+        <form id="cx-f"><label for="cx-cod">Código</label><input id="cx-cod" inputmode="numeric" autocomplete="one-time-code" required><button class="btn btn-pri" style="width:100%;margin-top:16px">Continuar</button></form>
+        ${p.erro ? `<div class="msg erro">${esc(p.mensagem || 'Código errado.')}</div>` : ''}`
+      $('#cx-f').onsubmit = (e) => { e.preventDefault(); responder($('#cx-cod').value.trim()) }
+      return
+    }
+    c.innerHTML = '<h3>Entrando…</h3><p>Aguarde alguns segundos.</p>'; esperar(3)
+  }
+  document.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-aplicar-bio]')
+    if (!b) return
+    pendente = { pid: b.dataset.plano, bio: +b.dataset.aplicarBio }
+    modal.hidden = false
+    const st = await api('/api/conexao').catch(() => ({ estado: 'desconectada' }))
+    if (st.estado === 'conectada') return aplicar(pendente.pid, pendente.bio)
+    corpo().innerHTML = `<h3>Conectar ${esc(M.rede_nome)}</h3><p>A senha vai direto para o ${esc(M.rede_nome)}, a partir de São Paulo, e não fica guardada.</p>
+      <form id="cx-l"><label for="cx-u">Usuário, e-mail ou telefone</label><input id="cx-u" autocomplete="off" required>
+      <label for="cx-s">Senha</label><input id="cx-s" type="password" autocomplete="off" required>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px"><input type="checkbox" id="cx-a" style="width:auto;margin-top:4px"><span>Autorizo o Perfilaí a entrar na minha conta só para aplicar o que eu escolher. A conexão é apagada depois.</span></label>
+      <button class="btn btn-pri" style="width:100%;margin-top:16px">Conectar e aplicar</button></form><div class="msg" id="cx-m"></div>`
+    $('#cx-l').onsubmit = async (ev) => {
+      ev.preventDefault()
+      if (!$('#cx-a').checked) { $('#cx-m').textContent = 'Marque a autorização para continuar.'; return }
+      ev.target.querySelector('button').disabled = true; $('#cx-m').textContent = 'Entrando… pode levar até um minuto.'
+      try { passo(await post('/api/conexao', { aceite: true, usuario: $('#cx-u').value, senha: $('#cx-s').value })) }
+      catch (err) { $('#cx-m').textContent = err.message; ev.target.querySelector('button').disabled = false }
+    }
+  })
 })()
