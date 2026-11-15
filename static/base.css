@@ -6,11 +6,11 @@ body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-app
 a{color:inherit}
 h1,h2,h3,.display{font-family:"Display",system-ui,sans-serif;font-weight:800;letter-spacing:-.02em;line-height:1.08;margin:0}
 .marca{font-family:"Display",sans-serif;font-size:22px;text-decoration:none;letter-spacing:-.03em;display:inline-flex;align-items:center;gap:8px}
-.marca i{width:28px;height:28px;border-radius:9px;background:linear-gradient(135deg,var(--ac),#ff5fa2);display:grid;place-items:center;color:#1a0630}
+.marca i{width:28px;height:28px;border-radius:9px;background:linear-gradient(135deg,var(--ac),var(--ac2,#ff5fa2));display:grid;place-items:center;color:#fff}
 .marca span{color:var(--ac)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:14px;padding:14px 24px;font:800 15px/1 "Display",system-ui,sans-serif;letter-spacing:.01em;cursor:pointer;text-decoration:none;transition:transform .15s,filter .15s,background .15s}
 .btn:active{transform:translateY(2px)}
-.btn-pri{background:var(--ac);color:#1a0630;box-shadow:0 4px 0 var(--acd)}
+.btn-pri{background:linear-gradient(135deg,var(--ac),var(--ac2,var(--ac)));color:#fff;box-shadow:0 4px 0 rgba(0,0,0,.35)}
 .btn-pri:active{box-shadow:0 2px 0 var(--acd)}
 .btn-pri:hover{filter:brightness(1.06)}
 .btn-sec{background:var(--card2);color:var(--fg);box-shadow:0 4px 0 #0a0e14;border:1px solid var(--bd)}
