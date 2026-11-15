@@ -40,6 +40,22 @@
     </form>
   </section>
 
+  <section class="painel-novo kit" id="imagens">
+    <h2>Imagens do perfil</h2>
+    <p class="sub-p">Foto profissional a partir da sua, capa e ícones de destaque na cor da sua marca. Até 3 de cada por semana.</p>
+    <div class="img-cards">
+      <div class="img-card"><strong>Foto profissional</strong><p class="sub-p">Mantém o seu rosto; melhora luz, fundo e enquadramento.</p>
+        <label class="btn btn-sec" for="foto-arq">Enviar minha foto<input id="foto-arq" type="file" accept="image/jpeg,image/png" hidden></label></div>
+      <div class="img-card" id="card-capa" hidden><strong>Capa</strong><p class="sub-p">Frase de posicionamento na capa.</p>
+        <input id="capa-frase" maxlength="90" placeholder="Ex.: Dados que viram decisão"><button class="btn btn-sec" id="b-capa" type="button">Gerar capa</button></div>
+      <div class="img-card" id="card-icones" hidden><strong>Ícones de destaque</strong><p class="sub-p">Separe os destaques por vírgula.</p>
+        <input id="icones-temas" maxlength="160" placeholder="Cardápio, Clientes, Entrega, Dúvidas"><button class="btn btn-sec" id="b-icones" type="button">Gerar ícones</button></div>
+    </div>
+    <input id="img-cor" type="color" value="#b46bff" class="cor" title="Cor da marca" style="margin-top:12px">
+    <div class="msg" id="img-msg" role="alert"></div>
+    <div class="kit-lista" id="img-lista"></div>
+  </section>
+
   <section class="painel-novo kit" id="kit">
     <h2>Kit de marca nas suas fotos e vídeos</h2>
     <p class="sub-p">Suba uma foto ou um vídeo seu (até 2 minutos) e receba de volta com a faixa da sua marca e o seu @, com animação de entrada. Sem cortar nada.</p>

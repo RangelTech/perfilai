@@ -116,3 +116,73 @@ def kit_video(origem: Path, destino: Path, arroba: str, cor: str) -> None:
                         "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", str(destino)], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("ffmpeg kit: " + r.stderr[-300:])
+
+
+# ----------------------------------------------------------------- imagens do perfil (spec 44 3.3.4)
+CAPAS = {"linkedin": (1584, 396), "facebook": (1640, 624)}
+
+
+def foto_perfil(dados: bytes) -> bytes:
+    """Quadrado 1080x1080 centralizado (a rede corta em círculo)."""
+    im = Image.open(io.BytesIO(dados)).convert("RGB")
+    w, h = im.size
+    lado = min(w, h)
+    im = im.crop(((w - lado) // 2, (h - lado) // 2, (w - lado) // 2 + lado, (h - lado) // 2 + lado)).resize((1080, 1080), Image.LANCZOS)
+    out = io.BytesIO()
+    im.save(out, "PNG", optimize=True)
+    return out.getvalue()
+
+
+def capa(dados: bytes, rede: str, frase: str, cor: str) -> bytes:
+    """Recorta o fundo gerado para o tamanho da capa e escreve a frase de posicionamento à direita (a foto fica à esquerda)."""
+    W, H = CAPAS.get(rede, CAPAS["linkedin"])
+    im = Image.open(io.BytesIO(dados)).convert("RGB")
+    w, h = im.size
+    alvo = W / H
+    if w / h > alvo:
+        nw = int(h * alvo)
+        im = im.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
+    else:
+        nh = int(w / alvo)
+        im = im.crop((0, (h - nh) // 2, w, (h - nh) // 2 + nh))
+    im = im.resize((W, H), Image.LANCZOS)
+    if frase:
+        d = ImageDraw.Draw(im)
+        f = ImageFont.truetype(str(FONTE), max(28, H // 7))
+        linhas = _quebrar(d, frase, f, int(W * 0.5))[:2]
+        alt = len(linhas) * int(H / 6)
+        y = (H - alt) // 2
+        x = int(W * 0.44)
+        caixa_w = max(d.textlength(l, font=f) for l in linhas) + 48
+        d.rounded_rectangle((x - 24, y - 18, x + caixa_w, y + alt + 12), radius=18, fill=(0, 0, 0))
+        for l in linhas:
+            d.text((x, y), l, font=f, fill=(255, 255, 255))
+            y += int(H / 6)
+    out = io.BytesIO()
+    im.save(out, "PNG", optimize=True)
+    return out.getvalue()
+
+
+def fatiar_icones(dados: bytes, colunas: int = 3, linhas: int = 2, cor: str = "#b46bff") -> list[bytes]:
+    """Uma imagem com todos os ícones em grade -> um PNG 1080x1080 por ícone, centralizado com margem para o corte redondo."""
+    im = Image.open(io.BytesIO(dados)).convert("RGB")
+    w, h = im.size
+    cw, ch = w // colunas, h // linhas
+    saida = []
+    for r in range(linhas):
+        for c in range(colunas):
+            cel = im.crop((c * cw, r * ch, (c + 1) * cw, (r + 1) * ch))
+            lado = min(cel.size)
+            cel = cel.crop(((cel.width - lado) // 2, (cel.height - lado) // 2, (cel.width - lado) // 2 + lado, (cel.height - lado) // 2 + lado))
+            fundo = Image.new("RGB", (1080, 1080), _rgb(cor))
+            cel = cel.resize((760, 760), Image.LANCZOS)
+            fundo.paste(cel, (160, 160))
+            px = list(cel.convert("L").resize((32, 32)).getdata())
+            media = sum(px) / len(px)
+            variacao = sum((x - media) ** 2 for x in px) / len(px)
+            if variacao < 30:  # célula vazia/lisa: o recorte não pegou um ícone
+                continue
+            out = io.BytesIO()
+            fundo.save(out, "PNG", optimize=True)
+            saida.append(out.getvalue())
+    return saida

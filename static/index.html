@@ -101,13 +101,13 @@
                 depois: { nome: 'Carlos Lima', bio: 'Analista de Dados Sênior | SQL, Python e Power BI | Reduzi 30% do tempo de fechamento financeiro com automação', link: 'Aberto a oportunidades', num: ['', '', ''] } },
   }[M.rede]
   const dica = {
-    foto: 'Kit de marca nas suas fotos e orientação de foto de perfil que passa confiança.',
+    foto: 'Foto profissional gerada pela IA a partir da sua: luz, fundo e enquadramento, mantendo o seu rosto.',
     nome: M.rede === 'linkedin' ? 'Nome como no documento, sem enfeite.' : 'Nome com a palavra que o seu cliente digita na busca.',
     bio: M.rede === 'linkedin' ? 'Título com cargo, especialidade e as palavras que o recrutador busca (até 220 caracteres).' : M.rotulo_bio + ' reescrita para vender, dentro do limite de ' + M.lim_bio + ' caracteres da rede.',
     link: M.rede === 'linkedin' ? '"Disponível para" e botão certo no topo do perfil.' : 'Link do site de vendas: a gente cria a página pronta para você publicar.',
-    dest: 'Destaques organizados pelo que o seu cliente procura.',
+    dest: 'Destaques com ícones gerados na cor da sua marca.',
     grade: 'Posts e carrosséis prontos: 1 por dia, 7 por semana.',
-    capa: 'Capa com a cor da marca e a sua frase de posicionamento.',
+    capa: 'Capa profissional gerada na cor da marca, com a sua frase de posicionamento.',
   }
   const alvo = (k, html) => `<div class="alvo" tabindex="0">${html}<span class="dica">${dica[k]}</span></div>`
   function desenhar(v) {

@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
@@ -407,6 +408,117 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True) -> FastAPI:
                 (novo, u["id"], pid, ent.get("arroba"), dia, idei["gancho"], legenda, f"{novo}.png", res.rota, agora()))
         log.info("post %s rota=%s", novo, res.rota)
         return post_publico(db.um("SELECT * FROM posts WHERE id=?", (novo,)))
+
+    # ------------------------------------------------------------ imagens do perfil: foto, capa, ícones (spec 44 3.3.4)
+    IMAGENS_SEMANA = 3
+
+    def limite_imagem(u: dict, tipo: str) -> None:
+        if eh_demo(u):
+            return
+        ini = midia_perfil.inicio_semana(agora())
+        if db.um("SELECT COUNT(*) n FROM imagens WHERE usuario=? AND tipo=? AND criado>=?", (u["id"], tipo, ini))["n"] >= IMAGENS_SEMANA:
+            raise HTTPException(429, f"você já gerou {IMAGENS_SEMANA} desta semana; na segunda-feira libera de novo")
+
+    def guardar_imagens(u: dict, tipo: str, pngs: list[bytes], rota: str) -> dict:
+        novo = uuid.uuid4().hex[:16]
+        pasta = Path(cfg.dados) / "imagens"
+        pasta.mkdir(parents=True, exist_ok=True)
+        nomes = []
+        for i, b in enumerate(pngs, 1):
+            n = f"{novo}_{i}.png"
+            (pasta / n).write_bytes(b)
+            nomes.append(n)
+        db.exec("INSERT INTO imagens(id,usuario,tipo,arquivos,rota,criado) VALUES(?,?,?,?,?,?)", (novo, u["id"], tipo, json.dumps(nomes), rota, agora()))
+        return {"id": novo, "tipo": tipo, "urls": [f"/api/imagens/{n}" for n in nomes]}
+
+    def exigir_assinante(u: dict, request: Request) -> None:
+        if not conta(u, marca_de(request)["id"])["assinante"] and not eh_demo(u):
+            raise HTTPException(402, "escolha um plano para gerar imagens")
+
+    @app.get("/api/imagens")
+    def minhas_imagens(request: Request):
+        u = usuario(request)
+        return {"itens": [{"id": x["id"], "tipo": x["tipo"], "urls": [f"/api/imagens/{n}" for n in json.loads(x["arquivos"])]}
+                          for x in db.todos("SELECT * FROM imagens WHERE usuario=? ORDER BY criado DESC LIMIT 30", (u["id"],))]}
+
+    @app.get("/api/imagens/{nome}")
+    def imagem_arquivo(nome: str, request: Request):
+        u = usuario(request)
+        if not re.fullmatch(r"[0-9a-f]{16}_\d+\.png", nome):
+            raise HTTPException(404, "imagem não encontrada")
+        x = db.um("SELECT 1 FROM imagens WHERE usuario=? AND id=?", (u["id"], nome.split("_")[0]))
+        if not x:
+            raise HTTPException(404, "imagem não encontrada")
+        return FileResponse(Path(cfg.dados) / "imagens" / nome, media_type="image/png", filename=nome)
+
+    @app.post("/api/imagens/foto")
+    async def gerar_foto(request: Request):
+        """Corpo cru: a foto atual da pessoa. A IA melhora luz, fundo e enquadramento mantendo o rosto (edição de imagem do GPT)."""
+        u = usuario(request)
+        exigir_assinante(u, request)
+        limite_imagem(u, "foto")
+        bruto = await request.body()
+        if len(bruto) < 1000 or len(bruto) > 12 * 1024 * 1024:
+            raise HTTPException(422, "mande uma foto (JPG ou PNG) de até 12 MB")
+        cor = request.headers.get("x-cor") or "#b46bff"
+        try:
+            from PIL import Image
+            ref = io.BytesIO()
+            Image.open(io.BytesIO(bruto)).convert("RGB").save(ref, "PNG")
+        except Exception:  # noqa: BLE001
+            raise HTTPException(422, "não consegui ler essa foto")
+        prompt = ("Professional profile photo of the SAME person in the reference image: keep the face, identity, skin tone and hair exactly the same. "
+                  f"Soft studio lighting, clean background in a soft tone of {cor}, sharp focus, head and shoulders, centered, friendly confident expression. No text.")
+        try:
+            r = rt_midia.imagem(prompt, cfg.llm_base, cfg.llm_key, "1024x1024", referencia=ref.getvalue(), classe="ok")
+        except rt_midia.ImagemIndisponivel as e:
+            raise HTTPException(503, str(e))
+        return guardar_imagens(u, "foto", [midia_perfil.foto_perfil(r.dados)], r.rota)
+
+    @app.post("/api/imagens/capa")
+    async def gerar_capa(request: Request):
+        u = usuario(request)
+        exigir_assinante(u, request)
+        mk = marca_de(request)
+        if mk["rede"] not in midia_perfil.CAPAS:
+            raise HTTPException(422, "capa existe no LinkedIn e no Facebook")
+        limite_imagem(u, "capa")
+        b = await request.json()
+        frase = str(b.get("frase") or "").strip()[:90]
+        cor = str(b.get("cor") or mk["cor"])
+        nicho = str(b.get("nicho") or "").strip()[:80]
+        prompt = (f"Wide abstract banner background for a {mk['rede_nome']} profile cover of a professional in {nicho or 'business'}. "
+                  f"Elegant gradient with {cor} as main color, subtle geometric shapes, lots of empty space, modern and clean. No text, no people, no logos.")
+        try:
+            r = rt_midia.imagem(prompt, cfg.llm_base, cfg.llm_key, "1536x1024", classe="ok")
+        except rt_midia.ImagemIndisponivel as e:
+            raise HTTPException(503, str(e))
+        return guardar_imagens(u, "capa", [midia_perfil.capa(r.dados, mk["rede"], frase, cor)], r.rota)
+
+    @app.post("/api/imagens/icones")
+    async def gerar_icones(request: Request):
+        """Ícones de destaque do Instagram: uma imagem com 6 ícones em grade 3x2, recortada em 6 capas 1080x1080."""
+        u = usuario(request)
+        exigir_assinante(u, request)
+        limite_imagem(u, "icones")
+        b = await request.json()
+        temas = [str(t).strip()[:24] for t in (b.get("temas") or []) if str(t).strip()][:6]
+        if len(temas) < 2:
+            raise HTTPException(422, "diga pelo menos 2 destaques (ex.: Cardápio, Clientes, Dúvidas)")
+        while len(temas) < 6:
+            temas.append(temas[len(temas) % 2])
+        cor = str(b.get("cor") or "#b46bff")
+        prompt = ("A 3x2 grid of six minimalist line icons for Instagram story highlight covers, each icon centered in its own equal cell, "
+                  f"same thin line style, white icons on a plain {cor} background, generous spacing, no text. Icons, left to right, top to bottom: "
+                  + ", ".join(temas) + ".")
+        try:
+            r = rt_midia.imagem(prompt, cfg.llm_base, cfg.llm_key, "1536x1024", classe="ok")
+        except rt_midia.ImagemIndisponivel as e:
+            raise HTTPException(503, str(e))
+        pngs = midia_perfil.fatiar_icones(r.dados, 3, 2, cor)
+        if len(pngs) < 2:
+            raise HTTPException(502, "os ícones não saíram bem desta vez; tente de novo")
+        return {**guardar_imagens(u, "icones", pngs, r.rota), "temas": temas[:len(pngs)]}
 
     # ------------------------------------------------------------ kit de marca em foto/vídeo do cliente (sem edição)
     @app.get("/api/kit")

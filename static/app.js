@@ -194,3 +194,34 @@
     } catch { info.textContent = 'Não consegui usar o microfone.' }
   }
 })()
+
+// Imagens do perfil: foto, capa, ícones (spec 44 3.3.4)
+;(() => {
+  const $ = (q) => document.querySelector(q)
+  const M = window.MARCA || { rede: 'instagram' }
+  if (!$('#imagens')) return
+  $('#card-capa').hidden = !(M.rede === 'linkedin' || M.rede === 'facebook')
+  $('#card-icones').hidden = M.rede !== 'instagram'
+  if (M.cor) $('#img-cor').value = M.cor
+  const msg = (t, tipo = '') => { const m = $('#img-msg'); m.textContent = t; m.className = 'msg ' + tipo }
+  async function listar() {
+    try {
+      const j = await (await fetch('/api/imagens')).json()
+      $('#img-lista').innerHTML = (j.itens || []).flatMap((x) => x.urls.map((u) => `<a href="${u}" download><img src="${u}" alt="${x.tipo}" loading="lazy"></a>`)).join('')
+    } catch {}
+  }
+  async function chamar(url, op, btn) {
+    const txt = btn ? btn.textContent : ''
+    if (btn) { btn.disabled = true; btn.textContent = 'Criando… (até 3 minutos)' }
+    msg('A IA está criando a imagem…')
+    try {
+      const r = await fetch(url, op); let j = {}; try { j = await r.json() } catch {}
+      if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : 'Não deu certo.')
+      msg('Pronto! Toque na imagem para baixar.', 'ok'); listar()
+    } catch (e) { msg(e.message, 'erro') } finally { if (btn) { btn.disabled = false; btn.textContent = txt } }
+  }
+  $('#foto-arq').onchange = (e) => { const f = e.target.files[0]; if (!f) return; chamar('/api/imagens/foto', { method: 'POST', headers: { 'x-cor': $('#img-cor').value }, body: f }); e.target.value = '' }
+  $('#b-capa').onclick = (e) => chamar('/api/imagens/capa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ frase: $('#capa-frase').value, cor: $('#img-cor').value, nicho: ($('#nicho') || {}).value || '' }) }, e.currentTarget)
+  $('#b-icones').onclick = (e) => chamar('/api/imagens/icones', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ temas: $('#icones-temas').value.split(','), cor: $('#img-cor').value }) }, e.currentTarget)
+  listar()
+})()
