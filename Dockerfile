@@ -1,4 +1,5 @@
 FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 RUN useradd --system --uid 10001 --no-create-home app && mkdir /data && chown 10001:10001 /data
 WORKDIR /srv
 COPY requirements.txt .
