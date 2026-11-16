@@ -35,8 +35,8 @@ def test_marca_pelo_dominio_e_landing(app_):
         assert c.get("/api/marca").json()["id"] == m
         html = c.get("/").text
         assert "{{" not in html and "window.MARCA" in html
-    assert "Linkdn AI" in cli(app_, "linkedin").get("/").text
-    assert "TitTok AI" in cli(app_, "tiktok").get("/").text
+    assert "Perfilaí LinkedIn" in cli(app_, "linkedin").get("/").text
+    assert "Perfilaí TikTok" in cli(app_, "tiktok").get("/").text
     assert TestClient(app_, base_url="https://perfilai.rangeltech.net").get("/api/marca").json()["id"] == "insta"
 
 
