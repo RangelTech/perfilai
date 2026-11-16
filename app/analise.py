@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 import httpx
+from app import admin  # prompts editáveis no /admin
 
 log = logging.getLogger("perfilai.analise")
 
@@ -103,7 +104,7 @@ def _chat(cfg, cliente: httpx.Client, modelos: list[str], conteudo, max_tokens: 
 def ler_prints(cfg, cliente: httpx.Client, arroba: str, prints: list[Path], rede_nome: str = "Instagram") -> dict:
     if not prints:
         return {}
-    partes = [{"type": "text", "text": LER_PRINTS.format(arroba=arroba, rede_nome=rede_nome)}]
+    partes = [{"type": "text", "text": admin.formatar("perfil-leitura", LER_PRINTS, arroba=arroba, rede_nome=rede_nome)}]
     for p in prints[:3]:
         tipo = "png" if p.suffix.lower() == ".png" else "jpeg"
         partes.append({"type": "image_url", "image_url": {"url": f"data:image/{tipo};base64,{base64.b64encode(p.read_bytes()).decode()}"}})
@@ -132,11 +133,11 @@ def plano(cfg, entrada: dict, prints: list[Path], avisar) -> dict:
         avisar("Lendo os prints do seu perfil", 0.1)
         leitura = ler_prints(cfg, c, a["arroba"], prints, m["rede_nome"])
         avisar("O diretor está montando a estratégia", 0.3)
-        d = _chat(cfg, c, [cfg.llm_planejador, cfg.llm_modelo], DIRETOR.format(**a, leitura=json.dumps(leitura, ensure_ascii=False)[:3000],
+        d = _chat(cfg, c, [cfg.llm_planejador, cfg.llm_modelo], admin.formatar("perfil-diretor", DIRETOR, **a, leitura=json.dumps(leitura, ensure_ascii=False)[:3000],
                                                                                 ganchos="; ".join(GANCHOS)), 6000, 0.6)
         est = d.get("estrategia") or {}
         avisar("Escrevendo bios, roteiros, stories e carrosséis", 0.6)
-        base = REDATOR_BASE.format(**a, briefing=str(d.get("briefing_mao_de_obra") or "")[:3000], posicionamento=est.get("posicionamento", ""),
+        base = admin.formatar("perfil-redator", REDATOR_BASE, **a, briefing=str(d.get("briefing_mao_de_obra") or "")[:3000], posicionamento=est.get("posicionamento", ""),
                                    pilares=", ".join(est.get("pilares") or []))
         w: dict = {}
         for k, (nome, parte) in enumerate(PARTES.items()):

@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from app import senha_rotas
 from app import analise, auth, mailer, marcas, midia_perfil, pecas, rt_midia
 from app.db import Banco, agora
+from app import admin  # painel /admin e prompts editáveis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("perfilai")
@@ -150,6 +151,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
     cfg = cfg or carregar()
     Path(cfg.dados).mkdir(parents=True, exist_ok=True)
     db = Banco(os.path.join(cfg.dados, "perfilai.db"))
+    admin.preparar(db)
     app = FastAPI(title="Perfil AI", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.cfg, app.state.db = cfg, db
     if pn is not None:
@@ -870,6 +872,13 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
         if len(texto) < 30:
             raise HTTPException(422, "não achei texto nesse arquivo (PDF escaneado?); cole o texto ou grave um áudio contando a sua trajetória")
         return {"texto": texto[:12000], "caracteres": len(texto)}
+
+    app.include_router(admin.rotas(db, cfg.segredo_sessao, """SELECT email, criado, plano, ativo_ate, (ativo_ate > strftime('%s','now')) ativo
+        FROM usuarios ORDER BY criado DESC""", seguro=not cfg.dev))
+
+    @app.get("/admin", response_class=HTMLResponse)
+    def pagina_admin():
+        return FileResponse(ESTATICO / "admin.html")
 
     app.mount("/s", StaticFiles(directory=ESTATICO), name="estatico")
     return app
