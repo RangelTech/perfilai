@@ -85,9 +85,12 @@ def _json(txt: str) -> dict:
 def _chat(cfg, cliente: httpx.Client, modelos: list[str], conteudo, max_tokens: int, temperatura: float = 0.6) -> dict:
     ultimo = None
     for modelo in [m for m in dict.fromkeys(m for m in modelos if m) for _ in (0, 1)]:
+        # texto da mão de obra vai pelo Hermes dos produtos; diretor (GPT) e visão seguem direto no llm-access
+        hermes = getattr(cfg, "hermes_base", "") and modelo == cfg.llm_modelo and isinstance(conteudo, str)
+        base, chave, nome = (cfg.hermes_base, cfg.hermes_key, "hermes-produtos") if hermes else (cfg.llm_base, cfg.llm_key, modelo)
         try:
-            r = cliente.post(cfg.llm_base + "/chat/completions", headers={"Authorization": f"Bearer {cfg.llm_key}"}, timeout=300,
-                             json={"model": modelo, "temperature": temperatura, "max_tokens": max_tokens, "chat_template_kwargs": {"enable_thinking": False},
+            r = cliente.post(base + "/chat/completions", headers={"Authorization": f"Bearer {chave}"}, timeout=300,
+                             json={"model": nome, "temperature": temperatura, "max_tokens": max_tokens, "chat_template_kwargs": {"enable_thinking": False},
                                    "messages": [{"role": "user", "content": conteudo}]})
             r.raise_for_status()
             return _json(r.json()["choices"][0]["message"]["content"])

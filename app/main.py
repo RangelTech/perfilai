@@ -51,6 +51,8 @@ class Config:
     llm_modelo: str = "rt-geral"          # mão de obra (Qwen)
     llm_planejador: str = "rt-planejar"   # diretor (GPT)
     llm_visao: str = "visao"              # lê os prints
+    hermes_base: str = ""                 # redator pelo Hermes dos produtos (Lucas, 16/11); vazio = direto no llm_base
+    hermes_key: str = ""
     segredo_sessao: str = "dev"
     smtp_host: str = ""
     smtp_port: int = 587
@@ -80,7 +82,7 @@ def carregar() -> Config:
     return Config(dados=e("PERFILAI_DADOS", "/data"), base_url=e("PERFILAI_BASE_URL", "https://perfilai.rangeltech.net"),
                   llm_base=e("PERFILAI_LLM_BASE", "https://qwen.rangeltech.net/v1"), llm_key=e("PERFILAI_LLM_KEY", ""),
                   llm_modelo=e("PERFILAI_LLM_MODELO", "rt-geral"), llm_planejador=e("PERFILAI_LLM_PLANEJADOR", "rt-planejar"),
-                  llm_visao=e("PERFILAI_LLM_VISAO", "visao"), segredo_sessao=e("PERFILAI_SEGREDO_SESSAO", "dev"),
+                  llm_visao=e("PERFILAI_LLM_VISAO", "visao"), hermes_base=e("PERFILAI_HERMES_BASE", "").rstrip("/"), hermes_key=e("PERFILAI_HERMES_KEY", ""), segredo_sessao=e("PERFILAI_SEGREDO_SESSAO", "dev"),
                   smtp_host=e("SMTP_HOST", ""), smtp_port=int(e("SMTP_PORT", "587") or 587), smtp_user=e("SMTP_USER", ""), smtp_senha=e("SMTP_PASSWORD", ""),
                   smtp_from=e("PERFILAI_SMTP_FROM", "Perfil AI <contato@rangeltech.net>"), cakto_segredo=e("PERFILAI_CAKTO_SEGREDO", ""),
                   dev=e("PERFILAI_DEV", "") == "1", checkouts=json.loads(e("PERFILAI_CHECKOUTS", "") or "{}"),
