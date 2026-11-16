@@ -1,4 +1,4 @@
-"""Perfilaí: plano de Instagram com IA (raio-x, bio, 30 ideias, roteiros, stories de venda, carrosséis e site de vendas). API + páginas."""
+"""Perfil AI: plano de Instagram com IA (raio-x, bio, 30 ideias, roteiros, stories de venda, carrosséis e site de vendas). API + páginas."""
 from __future__ import annotations
 
 import base64
@@ -56,7 +56,7 @@ class Config:
     smtp_port: int = 587
     smtp_user: str = ""
     smtp_senha: str = ""
-    smtp_from: str = "Perfilaí <contato@rangeltech.net>"
+    smtp_from: str = "Perfil AI <contato@rangeltech.net>"
     cakto_segredo: str = ""
     dev: bool = False
     checkouts: dict = None
@@ -82,7 +82,7 @@ def carregar() -> Config:
                   llm_modelo=e("PERFILAI_LLM_MODELO", "rt-geral"), llm_planejador=e("PERFILAI_LLM_PLANEJADOR", "rt-planejar"),
                   llm_visao=e("PERFILAI_LLM_VISAO", "visao"), segredo_sessao=e("PERFILAI_SEGREDO_SESSAO", "dev"),
                   smtp_host=e("SMTP_HOST", ""), smtp_port=int(e("SMTP_PORT", "587") or 587), smtp_user=e("SMTP_USER", ""), smtp_senha=e("SMTP_PASSWORD", ""),
-                  smtp_from=e("PERFILAI_SMTP_FROM", "Perfilaí <contato@rangeltech.net>"), cakto_segredo=e("PERFILAI_CAKTO_SEGREDO", ""),
+                  smtp_from=e("PERFILAI_SMTP_FROM", "Perfil AI <contato@rangeltech.net>"), cakto_segredo=e("PERFILAI_CAKTO_SEGREDO", ""),
                   dev=e("PERFILAI_DEV", "") == "1", checkouts=json.loads(e("PERFILAI_CHECKOUTS", "") or "{}"),
                   planos_por_produto=json.loads(e("PERFILAI_PLANOS_CAKTO", "") or "{}"), lancamento_ate=e("PERFILAI_LANCAMENTO_ATE", "2026-11-30"),
                   admin_key=e("PERFILAI_ADMIN_KEY", ""), demo_email=e("PERFILAI_DEMO_EMAIL", ""), demo_senha=e("PERFILAI_DEMO_SENHA", ""),
@@ -91,7 +91,7 @@ def carregar() -> Config:
 
 
 def ponte_cortai(cfg: Config, email: str, dias: int) -> bool:
-    """Turbo do Perfilaí libera o Cortaí Pro no mesmo e-mail (dias=0 revoga). Falha não quebra o webhook."""
+    """Turbo do Perfil AI libera o Cortaí Pro no mesmo e-mail (dias=0 revoga). Falha não quebra o webhook."""
     if not cfg.cortai_admin_key:
         return False
     try:
@@ -148,7 +148,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
     cfg = cfg or carregar()
     Path(cfg.dados).mkdir(parents=True, exist_ok=True)
     db = Banco(os.path.join(cfg.dados, "perfilai.db"))
-    app = FastAPI(title="Perfilaí", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="Perfil AI", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.cfg, app.state.db = cfg, db
     if pn is not None:
         app.state.pn = pn
@@ -790,7 +790,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
     def admin_resumo(request: Request):
         exigir_admin(request)
         ativos = db.todos("SELECT plano, COUNT(*) n FROM usuarios WHERE ativo_ate>? GROUP BY plano", (agora(),))
-        return {"produto": "perfilai", "nome": "Perfilaí", "url": cfg.base_url, "assinantes": sum(r["n"] for r in ativos),
+        return {"produto": "perfilai", "nome": "Perfil AI", "url": cfg.base_url, "assinantes": sum(r["n"] for r in ativos),
                 "por_plano": {r["plano"]: r["n"] for r in ativos},
                 "receita_mensal": round(sum(r["n"] * (PLANOS.get(r["plano"]) or PLANOS["start"])["preco"] for r in ativos), 2),
                 "cadastros": db.um("SELECT COUNT(*) n FROM usuarios")["n"],
