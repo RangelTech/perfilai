@@ -102,3 +102,11 @@ def test_prompt_segue_a_rede(monkeypatch, tmp_path):
     vistos.clear()
     analise.plano(cfg, {"arroba": "anadoces", "objetivo": "vender", "marca": "tiktok"}, [], lambda *a: None)
     assert "TikTok" in vistos[0] and any("80 caracteres" in v for v in vistos)
+
+
+def test_cakto_produto_fora_do_mapa_nao_libera(app_):
+    """Evento de teste da Cakto (produto de exemplo) não cria conta nem libera plano (antes liberava 'start')."""
+    c = cli(app_, "insta")
+    r = c.post("/api/cakto", json={"secret": "ck", "event": "purchase_approved", "data": {"id": "t9", "customer": {"email": "john.doe@example.com"}, "product": {"id": "exemplo"}}})
+    assert r.json()["ignorado"] == "produto fora do mapa"
+    assert not app_.state.db.um("SELECT 1 AS x FROM usuarios WHERE email=?", ("john.doe@example.com",))
