@@ -1,4 +1,5 @@
 """Suíte de perfil (spec 44 parte 3): marca pelo domínio, landing por marca, assinatura por marca, currículo do Linkdn AI."""
+from produtos_core.teste import entrar as _entrar_core
 import io
 import os
 
@@ -25,8 +26,7 @@ def cli(app_, marca):
 
 
 def entrar(c, email="ana@exemplo.com"):
-    cod = c.post("/api/entrar/codigo", json={"email": email}).json()["codigo_dev"]
-    assert c.post("/api/entrar", json={"email": email, "codigo": cod}).status_code == 200
+    _entrar_core(c, email)
 
 
 def test_marca_pelo_dominio_e_landing(app_):

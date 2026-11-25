@@ -1,4 +1,5 @@
 """Imagens do perfil (spec 44 3.3.4): foto profissional, capa por rede, ícones de destaque recortados de uma grade, limite semanal."""
+from produtos_core.teste import entrar
 import io
 import os
 
@@ -42,8 +43,7 @@ def app_(tmp_path, monkeypatch):
 
 def cli(a, host="insta-ai.rangeltech.net", email="ana@exemplo.com", produto="p"):
     c = TestClient(a, base_url=f"https://{host}")
-    cod = c.post("/api/entrar/codigo", json={"email": email}).json()["codigo_dev"]
-    c.post("/api/entrar", json={"email": email, "codigo": cod})
+    entrar(c, email)
     c.post("/api/cakto", json={"secret": "ck", "event": "purchase_approved", "data": {"id": email + produto, "customer": {"email": email}, "product": {"id": produto}}})
     return c
 

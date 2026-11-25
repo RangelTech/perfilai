@@ -1,4 +1,5 @@
 """Spec 44 5.2: limites por contas/semana e 3 rodadas por conta, post do dia (1/dia, 7/semana), kit de marca em foto e vídeo, renda extra."""
+from produtos_core.teste import entrar as _entrar_core
 import io
 import json
 import os
@@ -22,8 +23,7 @@ def cli(tmp_path):
 
 
 def entrar(c, email="ana@exemplo.com"):
-    cod = c.post("/api/entrar/codigo", json={"email": email}).json()["codigo_dev"]
-    assert c.post("/api/entrar", json={"email": email, "codigo": cod}).status_code == 200
+    _entrar_core(c, email)
 
 
 def assinar(c, email="ana@exemplo.com", produto="p-start"):

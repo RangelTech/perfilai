@@ -1,4 +1,5 @@
 """Conexão real da suíte (spec 44 3.3.3) com perfil-navegador falso: 2FA, aplicar a bio, sessão some ao aplicar e na virada da semana."""
+from produtos_core.teste import entrar
 import json
 import os
 import sys
@@ -43,8 +44,7 @@ def amb(tmp_path):
     cfg = Config(dados=str(tmp_path), dev=True, segredo_sessao="s", cakto_segredo="ck", demo_email="demo@rangeltech.net", demo_senha="Demo2026")
     app = criar_app(cfg, iniciar_fila=False, pn=PN("http://pn", "tk", transport=httpx.MockTransport(f.handler)))
     c = TestClient(app)
-    cod = c.post("/api/entrar/codigo", json={"email": "demo@rangeltech.net"}).json()["codigo_dev"]
-    c.post("/api/entrar", json={"email": "demo@rangeltech.net", "codigo": cod})
+    entrar(c, "demo@rangeltech.net")
     return c, f, app
 
 
