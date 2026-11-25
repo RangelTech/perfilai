@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 
 from app import senha_rotas
-from produtos_core import acesso
+from produtos_core import acesso, armazenamento
 from app import analise, auth, mailer, marcas, midia_perfil, pecas, rt_midia
 from app.db import Banco, agora
 from app import admin  # painel /admin e prompts editáveis
@@ -107,6 +107,16 @@ def ponte_cortai(cfg: Config, email: str, dias: int) -> bool:
         return False
 
 
+_ESPELHOS: dict = {}
+
+
+def espelho(cfg: Config) -> "armazenamento.Espelho":
+    """Arquivos no MinIO (fonte oficial), disco em cfg.dados como cache (spec 57 §8.6)."""
+    if cfg.dados not in _ESPELHOS:
+        _ESPELHOS[cfg.dados] = armazenamento.Espelho(armazenamento.Armazenamento(pasta_local=os.path.join(cfg.dados, "arquivos")), cfg.dados)
+    return _ESPELHOS[cfg.dados]
+
+
 def pasta_plano(cfg: Config, pid: str) -> Path:
     return Path(cfg.dados) / "planos" / pid
 
@@ -120,11 +130,13 @@ def processar(db: Banco, cfg: Config, p: dict) -> None:
         db.exec("UPDATE planos SET etapa=?, progresso=? WHERE id=?", (etapa, round(prog, 3), pid))
 
     try:
+        espelho(cfg).garantir_pasta(pasta)
         prints = [pasta / n for n in entrada.get("prints") or [] if (pasta / n).exists()]
         res = analise.plano(cfg, entrada, prints, avisar)
         avisar("Desenhando os carrosséis", 0.85)
         res["carrosseis_png"] = [pecas.carrossel(c, entrada.get("arroba", ""), entrada.get("cor", ""), pasta, i)
                                  for i, c in enumerate(res.get("carrosseis") or [], 1)]
+        espelho(cfg).guardar_pasta(pasta)
         db.exec("UPDATE planos SET estado='pronto', etapa='Pronto', progresso=1, resultado=?, fim=? WHERE id=?",
                 (json.dumps(res, ensure_ascii=False), agora(), pid))
         u = db.um("SELECT email FROM usuarios WHERE id=?", (p["usuario"],))
@@ -238,6 +250,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
                      login=_login, usuario=usuario, criar_usuario=lambda email: auth.usuario_por_email(db, email),
                      produto="Perfil AI", base_url=cfg.base_url, destino="/app", cor="#b46bff",
                      demo_email=lambda: cfg.demo_email, demo_senha=lambda: cfg.demo_senha, dev=cfg.dev)  # cadastro e login comuns (spec 57 §5A)
+    armazenamento.registrar(app, espelho(cfg).arm)  # MinIO (spec 57 §8.6)
 
     @app.post("/api/sair")
     def sair(request: Request):
@@ -292,10 +305,11 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
                 continue
             bruto = base64.b64decode(m.group(2))
             if len(bruto) > 6 * 1024 * 1024:
-                shutil.rmtree(pasta, ignore_errors=True)
+                espelho(cfg).apagar_pasta(pasta)
                 raise HTTPException(413, "cada print pode ter até 6 MB")
             ext = "png" if m.group(1) == "png" else "jpg"
             (pasta / f"print{i}.{ext}").write_bytes(bruto)
+            espelho(cfg).guardar(pasta / f"print{i}.{ext}")
             nomes.append(f"print{i}.{ext}")
         entrada = {"arroba": arroba, "objetivo": objetivo, "nicho": str(b.get("nicho") or "").strip()[:80],
                    "produto": str(b.get("produto") or "").strip()[:200], "cor": cor, "prints": nomes, "marca": mk["id"],
@@ -321,7 +335,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
         u = usuario(request)
         if not db.um("SELECT 1 FROM planos WHERE id=? AND usuario=?", (pid, u["id"])) or not re.fullmatch(r"carrossel\d_\d{2}\.png", nome):
             raise HTTPException(404, "não encontrado")
-        f = pasta_plano(cfg, pid) / nome
+        f = espelho(cfg).garantir(pasta_plano(cfg, pid) / nome)
         if not f.exists():
             raise HTTPException(404, "não encontrado")
         return FileResponse(f, media_type="image/png")
@@ -355,7 +369,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
         x = db.um("SELECT * FROM posts WHERE id=? AND usuario=?", (pid, u["id"]))
         if not x or not re.fullmatch(r"[0-9a-f]{16}", pid):
             raise HTTPException(404, "post não encontrado")
-        return FileResponse(Path(cfg.dados) / "posts" / x["arquivo"], media_type="image/png", filename=f"post-{x['dia']}.png")
+        return FileResponse(espelho(cfg).garantir(Path(cfg.dados) / "posts" / x["arquivo"]), media_type="image/png", filename=f"post-{x['dia']}.png")
 
     @app.post("/api/planos/{pid}/post")
     def gerar_post(pid: str, request: Request):
@@ -392,6 +406,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
         pasta = Path(cfg.dados) / "posts"
         pasta.mkdir(parents=True, exist_ok=True)
         (pasta / f"{novo}.png").write_bytes(png)
+        espelho(cfg).guardar(pasta / f"{novo}.png")
         tags = " ".join("#" + re.sub(r"\W", "", w_) for w_ in (ent.get("nicho") or "").split()[:3] if re.sub(r"\W", "", w_))
         legenda = (str(idei.get("ideia") or "") + ("\n\n" + tags if tags else "")).strip()
         db.exec("INSERT INTO posts(id,usuario,plano,arroba,dia,gancho,legenda,arquivo,rota,criado) VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -417,6 +432,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
         for i, b in enumerate(pngs, 1):
             n = f"{novo}_{i}.png"
             (pasta / n).write_bytes(b)
+            espelho(cfg).guardar(pasta / n)
             nomes.append(n)
         db.exec("INSERT INTO imagens(id,usuario,tipo,arquivos,rota,criado) VALUES(?,?,?,?,?,?)", (novo, u["id"], tipo, json.dumps(nomes), rota, agora()))
         return {"id": novo, "tipo": tipo, "urls": [f"/api/imagens/{n}" for n in nomes]}
@@ -439,7 +455,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
         x = db.um("SELECT 1 FROM imagens WHERE usuario=? AND id=?", (u["id"], nome.split("_")[0]))
         if not x:
             raise HTTPException(404, "imagem não encontrada")
-        return FileResponse(Path(cfg.dados) / "imagens" / nome, media_type="image/png", filename=nome)
+        return FileResponse(espelho(cfg).garantir(Path(cfg.dados) / "imagens" / nome), media_type="image/png", filename=nome)
 
     @app.post("/api/imagens/foto")
     async def gerar_foto(request: Request):
@@ -522,7 +538,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
         x = db.um("SELECT * FROM kits WHERE arquivo=? AND usuario=?", (nome, u["id"]))
         if not x:
             raise HTTPException(404, "arquivo não encontrado")
-        return FileResponse(Path(cfg.dados) / "kit" / nome, filename=f"com-marca-{nome}")
+        return FileResponse(espelho(cfg).garantir(Path(cfg.dados) / "kit" / nome), filename=f"com-marca-{nome}")
 
     @app.post("/api/kit")
     async def novo_kit(request: Request):
@@ -570,6 +586,7 @@ def criar_app(cfg: Config | None = None, iniciar_fila: bool = True, pn=None) -> 
                 midia_perfil.kit_video(tmp, pasta / saida, arroba, cor)
         finally:
             tmp.unlink(missing_ok=True)
+        espelho(cfg).guardar(pasta / saida)
         db.exec("INSERT INTO kits(id,usuario,arquivo,tipo,criado) VALUES(?,?,?,?,?)", (novo, u["id"], saida, "foto" if foto else "video", agora()))
         return {"id": novo, "tipo": "foto" if foto else "video", "url": f"/api/kit/{saida}"}
 
